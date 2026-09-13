@@ -24,9 +24,10 @@ export interface Room {
   ready: Promise<void>;
 }
 
-// Debounce window for periodic snapshotting while a document stays active. Real
-// compaction (collapsing the update log, not just re-snapshotting) is Phase 4 work
-// (Section 10, point 2) — this alone is what makes "persists across a refresh" true.
+// Debounce window for periodic snapshotting while a document stays active. The Core
+// API upserts this into a single per-document "auto-save" row rather than growing a
+// new one per tick (Section 10 point 2 / Section 11's compaction concern) — bounding
+// storage is the Core API's job since it owns Postgres.
 const PERSIST_DEBOUNCE_MS = 3000;
 
 const rooms = new Map<string, Room>();
@@ -183,6 +184,38 @@ export function getConnRole(room: Room, ws: WebSocket): DocumentRole | undefined
 
 export function applyAwarenessUpdate(room: Room, ws: WebSocket, update: Uint8Array): void {
   awarenessProtocol.applyAwarenessUpdate(room.awareness, update, ws);
+}
+
+/**
+ * Applies a "restore to an earlier version" (Section 7's versions/{id}/restore) to
+ * whichever room is currently live in memory for this document, if any. Plain
+ * Y.applyUpdate can't express "go back" — CRDT merges are monotonic, so replaying an
+ * old state's update onto a doc that has since diverged just no-ops. Instead this
+ * expresses the restore as a genuine new edit (delete everything, insert the restored
+ * content) that broadcasts and persists through the normal doc.on('update') path.
+ *
+ * Returns false if the document isn't currently loaded in memory — in that case the
+ * Core API's own Postgres write is what future connections will hydrate from, and
+ * there's nothing live to update here.
+ */
+export function restoreLiveRoom(documentId: string, restoredState: Uint8Array): boolean {
+  const room = rooms.get(documentId);
+  if (!room) {
+    return false;
+  }
+
+  const temp = new Y.Doc();
+  Y.applyUpdate(temp, restoredState);
+  const restoredText = temp.getText("body").toString();
+  temp.destroy();
+
+  room.doc.transact(() => {
+    const text = room.doc.getText("body");
+    text.delete(0, text.length);
+    text.insert(0, restoredText);
+  }, "restore");
+
+  return true;
 }
 
 /** Full current awareness snapshot, sent to a client right after it joins. */

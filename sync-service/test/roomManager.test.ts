@@ -19,6 +19,7 @@ const {
   removeConnection,
   applyAwarenessUpdate,
   encodeFullAwarenessState,
+  restoreLiveRoom,
   messageAwareness,
   _roomsForTesting,
 } = await import("../src/rooms/roomManager.js");
@@ -200,6 +201,37 @@ describe("roomManager", () => {
       expect(room.awareness.getStates().has(42)).toBe(false);
       // Bob (still connected) should have been told Alice's state was removed.
       expect(bob.send).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("restoreLiveRoom", () => {
+    it("replaces the live doc's content, broadcasts it, and schedules a persist", async () => {
+      fetchSnapshot.mockResolvedValue(null);
+      const room = await getOrCreateRoom("doc-restore-live");
+      room.doc.getText("body").insert(0, "current content that has since diverged");
+
+      const conn = fakeSocket();
+      addConnection(room, conn, "EDITOR");
+      conn.send = vi.fn();
+
+      const oldVersion = new Y.Doc();
+      oldVersion.getText("body").insert(0, "the old restored content");
+      const restoredState = Y.encodeStateAsUpdate(oldVersion);
+      oldVersion.destroy();
+
+      const applied = restoreLiveRoom("doc-restore-live", restoredState);
+
+      expect(applied).toBe(true);
+      expect(room.doc.getText("body").toString()).toBe("the old restored content");
+      expect(conn.send).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(saveSnapshot).toHaveBeenCalledWith("doc-restore-live", expect.any(Uint8Array));
+    });
+
+    it("returns false when the document isn't currently loaded in memory", () => {
+      const applied = restoreLiveRoom("doc-not-loaded", new Uint8Array());
+      expect(applied).toBe(false);
     });
   });
 });

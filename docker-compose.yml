@@ -33,9 +33,12 @@ services:
       DB_PASSWORD: cocanvas
       JWT_SECRET: dev-only-secret-please-override-in-every-real-environment-32b
       CORS_ALLOWED_ORIGINS: http://localhost:3000
-      # Shared with sync-service below — service-to-service trust for /internal/**,
-      # not a user credential (Section 8 / InternalServiceAuthFilter).
+      # Shared with sync-service below — service-to-service trust for /internal/**
+      # in both directions, not a user credential (InternalServiceAuthFilter).
       INTERNAL_SYNC_SECRET: dev-only-internal-secret-override-in-every-real-environment
+      # Where the Core API reaches the sync service to push a restored version into
+      # any live session (VersionService -> SyncServiceClient).
+      SYNC_SERVICE_INTERNAL_URL: http://sync-service:4000
     ports:
       - "8080:8080"
     depends_on:

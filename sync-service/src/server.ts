@@ -1,68 +1,54 @@
 import http from "node:http";
 import { URL } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
-import * as encoding from "lib0/encoding";
-import * as decoding from "lib0/decoding";
-import * as syncProtocol from "y-protocols/sync";
 import { verifyCollabToken, CollabTokenError } from "./auth/collabToken.js";
-import {
-  addConnection,
-  applyAwarenessUpdate,
-  encodeFullAwarenessState,
-  getOrCreateRoom,
-  messageAwareness,
-  messageSync,
-  removeConnection,
-  type Room,
-} from "./rooms/roomManager.js";
+import { addConnection, encodeFullAwarenessState, getOrCreateRoom, removeConnection, restoreLiveRoom, type Room } from "./rooms/roomManager.js";
+import { handleMessage, sendSyncStep1 } from "./relay.js";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-only-secret-please-override-in-every-real-environment-32b";
+const INTERNAL_SECRET = process.env.INTERNAL_SYNC_SECRET ?? "dev-only-internal-secret-override-in-every-real-environment";
 
 const server = http.createServer((req, res) => {
-  if (req.url === "/healthz") {
+  if (req.method === "GET" && req.url === "/healthz") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok", service: "sync-service" }));
     return;
   }
+
+  // Called only by the Core API (Section 7's restore endpoint), guarded by the same
+  // shared secret the sync service itself presents when calling the Core API's
+  // /internal/** — service-to-service trust in both directions, never a user JWT.
+  const restoreMatch = req.method === "POST" && req.url?.match(/^\/internal\/documents\/([^/]+)\/restore$/);
+  if (restoreMatch) {
+    if (req.headers["x-internal-secret"] !== INTERNAL_SECRET) {
+      res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "FORBIDDEN" }));
+      return;
+    }
+
+    const documentId = decodeURIComponent(restoreMatch[1]);
+    let body = "";
+    req.on("data", (chunk) => (body += chunk));
+    req.on("end", () => {
+      try {
+        const { state } = JSON.parse(body) as { state: string };
+        const applied = restoreLiveRoom(documentId, new Uint8Array(Buffer.from(state, "base64")));
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ appliedToLiveSession: applied }));
+      } catch (err) {
+        console.error(`[document ${documentId}] restore failed:`, err);
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "BAD_REQUEST" }));
+      }
+    });
+    return;
+  }
+
   res.writeHead(404).end();
 });
 
 const wss = new WebSocketServer({ noServer: true });
-
-function sendSyncStep1(ws: WebSocket, room: Room) {
-  const encoder = encoding.createEncoder();
-  encoding.writeVarUint(encoder, messageSync);
-  syncProtocol.writeSyncStep1(encoder, room.doc);
-  ws.send(encoding.toUint8Array(encoder));
-}
-
-function handleMessage(room: Room, ws: WebSocket, data: Buffer) {
-  const decoder = decoding.createDecoder(new Uint8Array(data));
-  const messageType = decoding.readVarUint(decoder);
-
-  switch (messageType) {
-    case messageSync: {
-      const encoder = encoding.createEncoder();
-      // TODO(Phase 4, Section 10 point 3): reject write-carrying sub-messages
-      // (syncStep2 / update) from VIEWER-role connections here. Deferred so Phase 2
-      // stayed scoped to single-client sync + persistence, per the build roadmap.
-      encoding.writeVarUint(encoder, messageSync);
-      syncProtocol.readSyncMessage(decoder, encoder, room.doc, ws);
-      if (encoding.length(encoder) > 1) {
-        ws.send(encoding.toUint8Array(encoder));
-      }
-      break;
-    }
-    case messageAwareness: {
-      const update = decoding.readVarUint8Array(decoder);
-      applyAwarenessUpdate(room, ws, update);
-      break;
-    }
-    default:
-      break;
-  }
-}
 
 wss.on("connection", (ws: WebSocket, documentId: string, role: ReturnType<typeof verifyCollabToken>["role"]) => {
   // getOrCreateRoom is async (it may hydrate from the Core API), but a client sends

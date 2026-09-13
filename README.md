@@ -33,7 +33,24 @@ assume anything beyond what's listed as done below actually works.
       serialized state is asserted byte-identical afterward, plus dedicated cases for
       out-of-order delivery and same-position concurrent inserts. Rendering live cursors
       in a UI is frontend work (Phase 6) — the relay/protocol side is what's built here.
-- [ ] **Phase 4 — Snapshotting + version history + write-permission enforcement.**
+- [x] **Phase 4 — Snapshotting + version history + write-permission enforcement.**
+      VIEWER-write enforcement lives at the relay (`sync-service/src/relay.ts`): a
+      VIEWER's own reads are still served, but any message that would mutate the doc is
+      dropped before it reaches the shared `Y.Doc` — verified both via unit tests and by
+      forging a raw write over the WebSocket protocol against the real running relay and
+      confirming it's silently rejected. `document_snapshots`' auto-save row is now
+      upserted in place per document (`SnapshotService`) instead of growing one row per
+      debounce tick — confirmed at the database level that repeated saves keep exactly
+      one auto-save row. Version history is real: `POST/GET .../versions` and
+      `.../versions/{id}/restore`, RBAC'd the same way as everything else (VIEWERs can
+      read history, not create or restore). Restoring doesn't just rewrite Postgres — the
+      Core API best-effort-pushes the restored content into any *live* sync-service
+      session too (`SyncServiceClient` → sync-service's own `/internal/.../restore`), so
+      someone currently viewing the document sees the restore happen in real time rather
+      than only on their next reconnect. Verified live end-to-end through the real
+      `docker compose` stack, including catching and fixing a real bug along the way
+      (Java's `HttpClient` defaulting to HTTP/2 against a plain HTTP/1.1 Node server,
+      which failed silently as "received no bytes" until pinned to HTTP/1.1).
 - [ ] **Phase 5 — Whiteboard mode.**
 - [ ] **Phase 6 — Redis presence, rate limiting, observability, Docker Compose, CI,
       deployment.** `frontend/` is currently just a folder scaffold — see its README.
@@ -86,7 +103,7 @@ cd sync-service && npm test    # Vitest, no external services needed
 
 ## API surface
 
-Core API (Phase 1 + Phase 2's collab-token endpoint):
+Core API:
 
 | Method & Path | Purpose |
 |---|---|
@@ -101,17 +118,21 @@ Core API (Phase 1 + Phase 2's collab-token endpoint):
 | `PATCH /api/documents/{id}` | Rename a document (OWNER/EDITOR only) |
 | `POST /api/documents/{id}/share` | Set a user's document role (OWNER only) |
 | `POST /api/documents/{id}/collab-token` | Exchange the access token for a 60s document-scoped token the sync service verifies independently (Section 8) |
-| `GET/POST /internal/documents/{id}/snapshot` | Sync-service-only, guarded by `X-Internal-Secret` — read/write the latest Yjs snapshot |
+| `GET /api/documents/{id}/versions` | List saved versions (any role with access) |
+| `POST /api/documents/{id}/versions` | Save the current state as a named version (OWNER/EDITOR; 409 if the document has no content yet) |
+| `POST /api/documents/{id}/versions/{versionId}/restore` | Restore a version — updates Postgres and best-effort-pushes into any live session (OWNER/EDITOR) |
+| `GET/POST /internal/documents/{id}/snapshot` | Sync-service-only, guarded by `X-Internal-Secret` — read/write the current auto-save Yjs state |
 
 Sync service:
 
 | Endpoint | Purpose |
 |---|---|
 | `GET /healthz` | Health check |
-| `WS /sync/{documentId}?token=<collab-token>` | Yjs sync-protocol relay for one document |
+| `WS /sync/{documentId}?token=<collab-token>` | Yjs sync-protocol + awareness relay for one document |
+| `POST /internal/documents/{id}/restore` | Core-API-only, guarded by `X-Internal-Secret` — pushes a restored version into the live in-memory session if the document is currently loaded |
 
-Version history (`GET/POST .../versions`) is still Phase 4. See the blueprint's Section 7
-for the full target surface.
+See the blueprint's Section 7 for the full target surface (e.g. Section 14's share modal
+UI, which is frontend work).
 
 ## How the sync service actually works
 
@@ -129,8 +150,15 @@ for the full target surface.
   everyone else in the room, a newly-joining connection gets the full current snapshot of
   everyone already present, and a disconnecting connection's presence is explicitly
   removed for the others rather than left stale.
-- `/internal/**` is authenticated with a shared secret (`INTERNAL_SYNC_SECRET`), not a user
-  JWT — this is service-to-service trust, distinct from the collab-token flow.
-- Not yet done (Phase 4 per the roadmap): rejecting write messages from VIEWER-role
-  connections at the relay, and update-log compaction. There's a `TODO` marking the former
-  in `sync-service/src/server.ts`.
+- `/internal/**` is authenticated with a shared secret (`INTERNAL_SYNC_SECRET`) in both
+  directions — sync service → Core API for snapshots, Core API → sync service for
+  restore pushes — never a user JWT, since this is service-to-service trust.
+- A VIEWER's messages are still processed for reads (they get synced content, see
+  presence, everything Section 3 says a viewer should see) but any message that would
+  mutate the doc is dropped at the relay (`sync-service/src/relay.ts`) before it ever
+  reaches the shared `Y.Doc` — enforced independently of whatever the frontend's UI
+  happens to allow.
+- Not yet done: real update-log compaction (collapsing Yjs's own internal structure, as
+  opposed to the Postgres-row compaction Phase 4 already does) — Section 10 point 2,
+  still open for a later phase if a long-lived, extremely active document's in-memory
+  size ever actually becomes a problem.
