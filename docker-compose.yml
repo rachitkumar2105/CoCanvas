@@ -61,18 +61,21 @@ services:
       core-api:
         condition: service_started
 
-  # frontend is not wired in yet — see frontend/README.md. Uncomment once Phase 1's
-  # UI work lands and the Next.js app actually builds.
-  # frontend:
-  #   build: ./frontend
-  #   environment:
-  #     NEXT_PUBLIC_CORE_API_URL: http://localhost:8080
-  #     NEXT_PUBLIC_SYNC_SERVICE_URL: ws://localhost:4000
-  #   ports:
-  #     - "3000:3000"
-  #   depends_on:
-  #     - core-api
-  #     - sync-service
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # These are baked into the client bundle at build time (Next.js inlines
+        # NEXT_PUBLIC_* vars), so they must be browser-reachable addresses — the
+        # published host ports below, not the in-network service hostnames the
+        # other containers use to reach each other.
+        NEXT_PUBLIC_CORE_API_URL: http://localhost:8080
+        NEXT_PUBLIC_SYNC_SERVICE_WS_URL: ws://localhost:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - core-api
+      - sync-service
 
 volumes:
   cocanvas-postgres-data:

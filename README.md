@@ -124,9 +124,45 @@ assume anything beyond what's listed as done below actually works.
       - **Deployment**: see the section below — Render/Railway or a single VM, per
         Section 16; not actually deployed from here since that needs an external
         platform account this environment doesn't have.
-      `frontend/` is still just a folder scaffold — it was never actually in Phase 6's
-      own roadmap text (Section 16 defines "all four services" as Core API, sync
-      service, Postgres, Redis), so building one wasn't in scope here either.
+      `frontend/` was still just a folder scaffold at the end of this phase — it was
+      never actually in Phase 6's own roadmap text (Section 16 defines "all four
+      services" as Core API, sync service, Postgres, Redis).
+- [~] **Frontend — document editor UI, by deliberate scope decision.** Section 21's own
+      honesty note is explicit: no frontend existed, so nobody could actually open a
+      browser and use CoCanvas — every phase above was verified at the protocol/API
+      level. This pass builds a real Next.js (App Router, TypeScript) UI covering the
+      document editor only, not the whiteboard, per Section 22's explicit permission to
+      ship a working document-only editor rather than a half-working doc-plus-whiteboard
+      one:
+      - Auth pages (register/login/logout), silent session restore on load via the
+        httpOnly refresh cookie and `/api/auth/refresh` (no token in `localStorage`).
+      - Workspace list + create, workspace member invites; document list + create
+        within a workspace.
+      - The collaborative editor itself, hand-bound to the Sync Service's actual
+        `Y.Text("body")` field rather than routed through TipTap's rich-text
+        `Y.XmlFragment` model — see `frontend/README.md` for why: the backend's
+        relay/persistence/restore logic (Phases 2-4, already tested) all operate on
+        that flat text field, and wiring in a rich editor would create a second,
+        disconnected shared type where version restore would silently do nothing
+        visible.
+      - A hand-rolled Yjs WebSocket provider (`useCollabProvider.ts`), not
+        `y-websocket` — the collab-token handoff (Section 8) needs a *fresh*
+        60-second-TTL token fetched from the Core API on every reconnect, which
+        `y-websocket`'s fixed-connection-params model doesn't support.
+      - Presence (avatars + Saved/Connecting/Reconnecting status), share modal
+        (OWNER/EDITOR/VIEWER), and a version history panel (save/list/restore) whose
+        restore is live — the relay's broadcast pushes the restored content into every
+        open tab, not just the one that clicked Restore.
+      - Verified live end-to-end in a real browser against the full `docker compose`
+        stack: register → create workspace/document → type in one tab → see it appear
+        live in a second tab with no refresh → refresh and confirm persistence → save
+        and restore a version live → share as VIEWER and confirm the second account
+        sees a read-only, disabled editor.
+      What's not built: the whiteboard canvas UI (the whiteboard *data layer* — shape
+      sync — is already built and tested on the backend; there's nothing to draw with
+      yet), inline collaborator cursor rendering inside the text (presence is
+      avatars-and-status, not an in-text caret — a native `<textarea>` can't render
+      one the way a rich editor can), and a user settings/profile page.
 
 Never claim a later phase or a Tier 3 feature (Section 3) as done until it's actually built
 and tested.
@@ -136,7 +172,7 @@ and tested.
 ```
 core-api/       Java 21 + Spring Boot 3 — auth, workspaces, document metadata, permissions
 sync-service/   Node.js + TypeScript — Yjs relay, collab-token auth, snapshot persistence
-frontend/       React/Next.js shell (Phase 1 follow-up / Phase 5-6)
+frontend/       Next.js + TypeScript — auth, workspaces, the collaborative document editor
 docker-compose.yml
 ```
 
@@ -146,8 +182,8 @@ docker-compose.yml
 docker compose up --build
 ```
 
-Brings up Postgres, Redis, the Core API (`:8080`), and the sync service (`:4000`).
-`frontend/` isn't wired in yet — see its own README.
+Brings up Postgres, Redis, the Core API (`:8080`), the sync service (`:4000`), and the
+frontend (`:3000`) — open `http://localhost:3000`.
 
 ### Running each service locally (without Docker)
 
@@ -165,6 +201,15 @@ Sync service — requires Node 20+, and the Core API running (for snapshot persi
 cd sync-service
 npm install
 npm run dev
+```
+
+Frontend — requires Node 20+, and both backend services running:
+
+```bash
+cd frontend
+cp .env.example .env.local
+npm install
+npm run dev   # http://localhost:3000
 ```
 
 ### Running tests

@@ -11,6 +11,10 @@ frontend/.next/
 frontend/out/
 npm-debug.log*
 
+# TypeScript
+*.tsbuildinfo
+frontend/next-env.d.ts
+
 # IDE
 .idea/
 *.iml
