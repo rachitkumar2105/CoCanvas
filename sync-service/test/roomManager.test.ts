@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
+import * as awarenessProtocol from "y-protocols/awareness";
+import * as encoding from "lib0/encoding";
+import * as decoding from "lib0/decoding";
 
 const fetchSnapshot = vi.fn();
 const saveSnapshot = vi.fn().mockResolvedValue(undefined);
@@ -10,9 +13,33 @@ vi.mock("../src/persistence/coreApiClient.js", () => ({
 }));
 
 // Imported after the mock so roomManager picks up the mocked coreApiClient.
-const { getOrCreateRoom, addConnection, removeConnection, _roomsForTesting } = await import(
-  "../src/rooms/roomManager.js"
-);
+const {
+  getOrCreateRoom,
+  addConnection,
+  removeConnection,
+  applyAwarenessUpdate,
+  encodeFullAwarenessState,
+  messageAwareness,
+  _roomsForTesting,
+} = await import("../src/rooms/roomManager.js");
+
+/** Builds a raw awareness-update payload as a real client would, for a synthetic client. */
+function makeAwarenessUpdate(clientId: number, state: Record<string, unknown> | null) {
+  const doc = new Y.Doc({ guid: String(clientId) });
+  Object.defineProperty(doc, "clientID", { value: clientId });
+  const awareness = new awarenessProtocol.Awareness(doc);
+  awareness.setLocalState(state);
+  const update = awarenessProtocol.encodeAwarenessUpdate(awareness, [clientId]);
+  awareness.destroy();
+  return update;
+}
+
+function decodeAwarenessPayload(payload: Uint8Array) {
+  const decoder = decoding.createDecoder(payload);
+  const type = decoding.readVarUint(decoder);
+  const inner = decoding.readVarUint8Array(decoder);
+  return { type, inner };
+}
 
 function fakeSocket() {
   return { readyState: 1, OPEN: 1, send: vi.fn() } as unknown as import("ws").WebSocket;
@@ -109,5 +136,70 @@ describe("roomManager", () => {
 
     expect(saveSnapshot).not.toHaveBeenCalled();
     expect(_roomsForTesting().has("doc-multi-conn")).toBe(true);
+  });
+
+  describe("presence / awareness", () => {
+    it("relays an incoming awareness update to other connections but not back to its sender", async () => {
+      fetchSnapshot.mockResolvedValue(null);
+      const room = await getOrCreateRoom("doc-awareness-broadcast");
+      const alice = fakeSocket();
+      const bob = fakeSocket();
+      addConnection(room, alice, "EDITOR");
+      addConnection(room, bob, "EDITOR");
+
+      const update = makeAwarenessUpdate(9001, { name: "Alice", color: "#f00", cursor: 5 });
+      applyAwarenessUpdate(room, alice, update);
+
+      expect(bob.send).toHaveBeenCalledTimes(1);
+      expect(alice.send).not.toHaveBeenCalled();
+
+      const { type, inner } = decodeAwarenessPayload((bob.send as any).mock.calls[0][0]);
+      expect(type).toBe(messageAwareness);
+      // encodeAwarenessUpdate's payload embeds the state as a JSON string — cheapest
+      // way to assert the right client's state made it through unmodified.
+      expect(Buffer.from(inner).toString("latin1")).toContain("Alice");
+    });
+
+    it("returns null (nothing to send) for a brand-new room with no known participants", async () => {
+      fetchSnapshot.mockResolvedValue(null);
+      const room = await getOrCreateRoom("doc-awareness-empty");
+      expect(encodeFullAwarenessState(room)).toBeNull();
+    });
+
+    it("encodes every known participant's state for a client joining later", async () => {
+      fetchSnapshot.mockResolvedValue(null);
+      const room = await getOrCreateRoom("doc-awareness-snapshot");
+      const alice = fakeSocket();
+      addConnection(room, alice, "EDITOR");
+      applyAwarenessUpdate(room, alice, makeAwarenessUpdate(1, { name: "Alice" }));
+      applyAwarenessUpdate(room, alice, makeAwarenessUpdate(2, { name: "Bob" }));
+
+      const snapshot = encodeFullAwarenessState(room);
+      expect(snapshot).not.toBeNull();
+      const { type, inner } = decodeAwarenessPayload(snapshot!);
+      expect(type).toBe(messageAwareness);
+      const text = Buffer.from(inner).toString("latin1");
+      expect(text).toContain("Alice");
+      expect(text).toContain("Bob");
+    });
+
+    it("removes a connection's awareness state (e.g. its cursor) when it disconnects", async () => {
+      fetchSnapshot.mockResolvedValue(null);
+      const room = await getOrCreateRoom("doc-awareness-cleanup");
+      const alice = fakeSocket();
+      const bob = fakeSocket();
+      addConnection(room, alice, "EDITOR");
+      addConnection(room, bob, "EDITOR");
+      applyAwarenessUpdate(room, alice, makeAwarenessUpdate(42, { name: "Alice" }));
+
+      expect(room.awareness.getStates().has(42)).toBe(true);
+      bob.send = vi.fn();
+
+      await removeConnection(room, alice);
+
+      expect(room.awareness.getStates().has(42)).toBe(false);
+      // Bob (still connected) should have been told Alice's state was removed.
+      expect(bob.send).toHaveBeenCalledTimes(1);
+    });
   });
 });

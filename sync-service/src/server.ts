@@ -5,9 +5,16 @@ import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 import * as syncProtocol from "y-protocols/sync";
 import { verifyCollabToken, CollabTokenError } from "./auth/collabToken.js";
-import { addConnection, getOrCreateRoom, removeConnection, type Room } from "./rooms/roomManager.js";
-
-const messageSync = 0;
+import {
+  addConnection,
+  applyAwarenessUpdate,
+  encodeFullAwarenessState,
+  getOrCreateRoom,
+  messageAwareness,
+  messageSync,
+  removeConnection,
+  type Room,
+} from "./rooms/roomManager.js";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-only-secret-please-override-in-every-real-environment-32b";
@@ -30,23 +37,30 @@ function sendSyncStep1(ws: WebSocket, room: Room) {
   ws.send(encoding.toUint8Array(encoder));
 }
 
-function handleSyncMessage(room: Room, ws: WebSocket, data: Buffer) {
+function handleMessage(room: Room, ws: WebSocket, data: Buffer) {
   const decoder = decoding.createDecoder(new Uint8Array(data));
-  const encoder = encoding.createEncoder();
   const messageType = decoding.readVarUint(decoder);
 
-  if (messageType !== messageSync) {
-    return;
-  }
-
-  // TODO(Phase 4, Section 10 point 3): reject write-carrying sub-messages
-  // (syncStep2 / update) from VIEWER-role connections here. Deferred so Phase 2
-  // stays scoped to single-client sync + persistence, per the build roadmap.
-  encoding.writeVarUint(encoder, messageSync);
-  syncProtocol.readSyncMessage(decoder, encoder, room.doc, ws);
-
-  if (encoding.length(encoder) > 1) {
-    ws.send(encoding.toUint8Array(encoder));
+  switch (messageType) {
+    case messageSync: {
+      const encoder = encoding.createEncoder();
+      // TODO(Phase 4, Section 10 point 3): reject write-carrying sub-messages
+      // (syncStep2 / update) from VIEWER-role connections here. Deferred so Phase 2
+      // stayed scoped to single-client sync + persistence, per the build roadmap.
+      encoding.writeVarUint(encoder, messageSync);
+      syncProtocol.readSyncMessage(decoder, encoder, room.doc, ws);
+      if (encoding.length(encoder) > 1) {
+        ws.send(encoding.toUint8Array(encoder));
+      }
+      break;
+    }
+    case messageAwareness: {
+      const update = decoding.readVarUint8Array(decoder);
+      applyAwarenessUpdate(room, ws, update);
+      break;
+    }
+    default:
+      break;
   }
 }
 
@@ -64,7 +78,7 @@ wss.on("connection", (ws: WebSocket, documentId: string, role: ReturnType<typeof
       pending.push(data);
       return;
     }
-    handleSyncMessage(room, ws, data);
+    handleMessage(room, ws, data);
   });
 
   ws.on("close", () => {
@@ -85,8 +99,12 @@ wss.on("connection", (ws: WebSocket, documentId: string, role: ReturnType<typeof
       room = r;
       addConnection(room, ws, role);
       sendSyncStep1(ws, room);
+      const awarenessState = encodeFullAwarenessState(room);
+      if (awarenessState) {
+        ws.send(awarenessState);
+      }
       for (const data of pending) {
-        handleSyncMessage(room, ws, data);
+        handleMessage(room, ws, data);
       }
       pending.length = 0;
     })
