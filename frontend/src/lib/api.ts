@@ -95,7 +95,10 @@ async function tryRefresh(): Promise<boolean> {
 
 export const api = {
   register: (name: string, email: string, password: string) =>
-    request<AuthResponse>("/api/auth/register", { method: "POST", body: JSON.stringify({ name, email, password }) }),
+    request<AuthResponse>("/api/auth/register", {
+      method: "POST",
+      body: JSON.stringify({ name, email, password }),
+    }),
 
   login: (email: string, password: string) =>
     request<AuthResponse>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),

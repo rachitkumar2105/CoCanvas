@@ -18,9 +18,7 @@ describe("fetchSnapshot", () => {
   it("decodes the base64 state into bytes on success", async () => {
     const original = new Uint8Array([1, 2, 3, 250, 255]);
     const base64 = Buffer.from(original).toString("base64");
-    global.fetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ state: base64 }), { status: 200 })
-    );
+    global.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ state: base64 }), { status: 200 }));
 
     const result = await fetchSnapshot("doc-1");
     expect(result).toEqual(original);

@@ -41,7 +41,7 @@ consistent with the rest of this project's build discipline.
 (same message framing as `sync-service/src/relay.ts` and `roomManager.ts`) rather than using
 the `y-websocket` package's `WebsocketProvider`. The reason is the collab-token handoff
 (Section 8): the token is scoped to one document and expires in 60 seconds, and a fresh one
-must be fetched from the Core API on *every* reconnect — not just the first connection.
+must be fetched from the Core API on _every_ reconnect — not just the first connection.
 `y-websocket` assumes a fixed set of connection params for the life of the provider, which
 doesn't fit that model. The hand-rolled provider re-fetches `/api/documents/{id}/collab-token`
 before each (re)connect attempt, with exponential backoff on failure.
@@ -54,13 +54,13 @@ flat, opaque JSON record per shape in a top-level `Y.Map` keyed by id
 (`sync-service/src/rooms/shapes.ts`), with no nested per-property CRDT merging (an edit
 replaces a shape atomically). Bridging either library's schema onto that model is real
 adapter work for a library that would then fight the underlying data structure, rather than
-the TipTap situation where the library actively assumed a *different* Yjs type existed.
+the TipTap situation where the library actively assumed a _different_ Yjs type existed.
 Given that, `src/components/Whiteboard.tsx` is a small hand-rolled SVG canvas — rectangles,
 ellipses, sticky notes, and freehand paths, each stored exactly as `shapes.ts` describes them
 — which keeps the frontend's shape schema and the tested backend's shape schema identical
 instead of introducing a translation layer.
 
-Unlike the text editor, the whiteboard *does* render other collaborators' live cursors as
+Unlike the text editor, the whiteboard _does_ render other collaborators' live cursors as
 colored dots (via the same awareness channel, with a `cursor: {x, y}` field) — a canvas is
 just coordinates, so this doesn't have the "can't render a caret inside a native textarea"
 problem the document editor has.
@@ -83,7 +83,7 @@ problem the document editor has.
 
 ## What's explicitly not built
 
-- Inline collaborator cursor rendering inside the *text* editor (a native `<textarea>`
+- Inline collaborator cursor rendering inside the _text_ editor (a native `<textarea>`
   can't render a colored caret at another user's position the way a rich editor can) —
   presence is visible there as avatars + connection status instead
 - Shape resize handles (move and delete are implemented; resizing an existing shape isn't)

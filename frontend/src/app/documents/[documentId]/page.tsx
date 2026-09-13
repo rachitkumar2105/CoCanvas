@@ -107,9 +107,21 @@ function DocumentEditorContent() {
       <main className={doc.type === "WHITEBOARD" ? "" : "px-6 py-10"}>
         {provider ? (
           doc.type === "WHITEBOARD" ? (
-            <Whiteboard doc={yDoc} provider={provider} userId={user.userId} userName={user.name} editable={canWrite} />
+            <Whiteboard
+              doc={yDoc}
+              provider={provider}
+              userId={user.userId}
+              userName={user.name}
+              editable={canWrite}
+            />
           ) : (
-            <Editor doc={yDoc} provider={provider} userId={user.userId} userName={user.name} editable={canWrite} />
+            <Editor
+              doc={yDoc}
+              provider={provider}
+              userId={user.userId}
+              userName={user.name}
+              editable={canWrite}
+            />
           )
         ) : (
           <div className="flex justify-center py-20 text-gray-400">Connecting…</div>

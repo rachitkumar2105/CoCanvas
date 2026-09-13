@@ -4,7 +4,7 @@ import * as encoding from "lib0/encoding";
 import * as awarenessProtocol from "y-protocols/awareness";
 import { fetchSnapshot, saveSnapshot } from "../persistence/coreApiClient.js";
 import type { DocumentRole, DocumentType } from "../auth/collabToken.js";
-import { getShapesMap } from "./shapes.js";
+import { getDocumentTypeStrategy } from "./documentTypeStrategy.js";
 import { mirrorPresence, removePresence } from "../presence/redisPresence.js";
 import { docLogger } from "../logger.js";
 
@@ -95,7 +95,7 @@ async function persistNow(room: Room): Promise<void> {
   await saveSnapshot(room.documentId, state);
   docLogger(room.documentId).info(
     { durationMs: Math.round(performance.now() - startedAt), bytes: state.byteLength },
-    "snapshot persisted"
+    "snapshot persisted",
   );
 }
 
@@ -163,7 +163,7 @@ export async function getOrCreateRoom(documentId: string, documentType: Document
       for (const id of removed) {
         void removePresence(room.documentId, id);
       }
-    }
+    },
   );
 
   rooms.set(documentId, room);
@@ -232,21 +232,10 @@ export function restoreLiveRoom(documentId: string, restoredState: Uint8Array): 
   const temp = new Y.Doc();
   Y.applyUpdate(temp, restoredState);
 
-  if (room.documentType === "WHITEBOARD") {
-    const restoredShapes = getShapesMap(temp);
-    room.doc.transact(() => {
-      const shapes = getShapesMap(room.doc);
-      shapes.clear();
-      restoredShapes.forEach((shape, id) => shapes.set(id, shape));
-    }, "restore");
-  } else {
-    const restoredText = temp.getText("body").toString();
-    room.doc.transact(() => {
-      const text = room.doc.getText("body");
-      text.delete(0, text.length);
-      text.insert(0, restoredText);
-    }, "restore");
-  }
+  const strategy = getDocumentTypeStrategy(room.documentType);
+  room.doc.transact(() => {
+    strategy.replaceWithRestoredState(room.doc, temp);
+  }, "restore");
 
   temp.destroy();
   return true;
@@ -266,4 +255,24 @@ export function encodeFullAwarenessState(room: Room): Uint8Array | null {
 
 export function _roomsForTesting() {
   return rooms;
+}
+
+/**
+ * Graceful-shutdown hook (Section 12's reliability story): a routine restart shouldn't
+ * silently lose the last few seconds of edits sitting behind a debounce timer. Flushes
+ * every live room's current state unconditionally rather than only ones with a pending
+ * timer — cheap, and avoids a race between "check if pending" and "the timer fires
+ * anyway during the check."
+ */
+export async function flushAllRooms(): Promise<void> {
+  const flushes = Array.from(rooms.values()).map((room) => {
+    if (room.persistTimer) {
+      clearTimeout(room.persistTimer);
+      room.persistTimer = null;
+    }
+    return persistNow(room).catch((err) => {
+      docLogger(room.documentId).error({ err }, "shutdown flush failed");
+    });
+  });
+  await Promise.all(flushes);
 }

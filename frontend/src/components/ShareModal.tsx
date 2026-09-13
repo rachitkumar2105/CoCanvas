@@ -26,10 +26,7 @@ export function ShareModal({ documentId, onClose }: { documentId: string; onClos
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onClose}>
-      <div
-        className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+      <div className="w-full max-w-sm rounded-lg bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-semibold text-gray-900">Share document</h2>
         <form onSubmit={submit} className="mt-4 space-y-3">
           <input

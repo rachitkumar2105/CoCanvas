@@ -28,7 +28,7 @@ function simulateNetwork(docs: Y.Doc[]): { flush: () => Promise<void> } {
               Y.applyUpdate(other, update, "remote");
               resolve();
             }, randomDelayMs());
-          })
+          }),
         );
       });
     });
@@ -70,6 +70,51 @@ describe("Yjs convergence under concurrent, delayed, interleaved edits", () => {
       expect(docs[i].getText("body").toString()).toBe(referenceText);
       // Byte-identical serialized state, not just matching text — the actual guarantee
       // Section 10 describes: every replica's internal state converges identically.
+      expect(Y.encodeStateAsUpdate(docs[i])).toEqual(referenceState);
+    }
+
+    docs.forEach((doc) => doc.destroy());
+  });
+
+  it("converges at scale: 40 clients, randomized delayed/reordered edits, with recorded latency", async () => {
+    const CLIENT_COUNT = 40;
+    const EDITS_PER_CLIENT = 6;
+    const docs = Array.from({ length: CLIENT_COUNT }, () => new Y.Doc());
+    const network = simulateNetwork(docs);
+
+    const startedAt = performance.now();
+
+    docs.forEach((doc, clientIndex) => {
+      const text = doc.getText("body");
+      for (let edit = 0; edit < EDITS_PER_CLIENT; edit++) {
+        const len = text.length;
+        if (len > 3 && Math.random() < 0.3) {
+          const deleteAt = Math.floor(Math.random() * (len - 1));
+          text.delete(deleteAt, 1);
+        } else {
+          const insertAt = len === 0 ? 0 : Math.floor(Math.random() * (len + 1));
+          text.insert(insertAt, `[c${clientIndex}e${edit}]`);
+        }
+      }
+    });
+
+    await network.flush();
+    const convergenceMs = performance.now() - startedAt;
+
+    // Not a strict performance assertion (this is a correctness test, not a benchmark) —
+    // just a sanity bound so a genuine regression (e.g. an accidental O(n^2) broadcast
+    // fan-out) fails loudly here instead of only showing up as "the demo feels slow."
+    // eslint-disable-next-line no-console
+    console.log(
+      `[convergence@scale] ${CLIENT_COUNT} clients, ${EDITS_PER_CLIENT} edits each: ${convergenceMs.toFixed(1)}ms to converge`,
+    );
+    expect(convergenceMs).toBeLessThan(5000);
+
+    const referenceText = docs[0].getText("body").toString();
+    const referenceState = Y.encodeStateAsUpdate(docs[0]);
+
+    for (let i = 1; i < docs.length; i++) {
+      expect(docs[i].getText("body").toString()).toBe(referenceText);
       expect(Y.encodeStateAsUpdate(docs[i])).toEqual(referenceState);
     }
 
@@ -216,11 +261,13 @@ describe("Yjs convergence for whiteboard shapes (Y.Map)", () => {
   });
 
   it("converges across many clients with randomized, interleaved, delayed shape edits", async () => {
-    const CLIENT_COUNT = 5;
+    const CLIENT_COUNT = 30;
     const EDITS_PER_CLIENT = 10;
     const SHARED_SHAPE_IDS = ["shape-a", "shape-b", "shape-c"];
     const docs = Array.from({ length: CLIENT_COUNT }, () => new Y.Doc());
     const network = simulateNetwork(docs);
+
+    const startedAt = performance.now();
 
     docs.forEach((doc, clientIndex) => {
       const shapes = shapesOf(doc);
@@ -235,6 +282,12 @@ describe("Yjs convergence for whiteboard shapes (Y.Map)", () => {
     });
 
     await network.flush();
+    const convergenceMs = performance.now() - startedAt;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[convergence@scale] ${CLIENT_COUNT} whiteboard clients, ${EDITS_PER_CLIENT} edits each: ${convergenceMs.toFixed(1)}ms to converge`,
+    );
+    expect(convergenceMs).toBeLessThan(5000);
 
     const referenceState = Y.encodeStateAsUpdate(docs[0]);
     for (let i = 1; i < docs.length; i++) {

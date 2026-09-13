@@ -28,7 +28,7 @@ async function ensureConnected(): Promise<void> {
       (err) => {
         connecting = null;
         throw err;
-      }
+      },
     );
   }
   await connecting;

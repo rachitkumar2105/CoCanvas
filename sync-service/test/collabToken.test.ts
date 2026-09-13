@@ -16,7 +16,7 @@ function makeToken(overrides: Record<string, unknown> = {}, opts: jwt.SignOption
       ...overrides,
     },
     SECRET,
-    { subject: USER_ID, expiresIn: "60s", ...opts }
+    { subject: USER_ID, expiresIn: "60s", ...opts },
   );
 }
 
@@ -47,9 +47,7 @@ describe("verifyCollabToken", () => {
 
   it("rejects a token signed with a different secret", () => {
     const token = makeToken({}, {});
-    expect(() => verifyCollabToken(token, DOCUMENT_ID, "a-totally-different-secret-value")).toThrow(
-      CollabTokenError
-    );
+    expect(() => verifyCollabToken(token, DOCUMENT_ID, "a-totally-different-secret-value")).toThrow(CollabTokenError);
   });
 
   it("rejects a token scoped to a different document", () => {

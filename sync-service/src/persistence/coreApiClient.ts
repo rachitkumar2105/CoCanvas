@@ -1,5 +1,6 @@
 const CORE_API_INTERNAL_URL = process.env.CORE_API_INTERNAL_URL ?? "http://localhost:8080";
-const INTERNAL_SECRET = process.env.INTERNAL_SYNC_SECRET ?? "dev-only-internal-secret-override-in-every-real-environment";
+const INTERNAL_SECRET =
+  process.env.INTERNAL_SYNC_SECRET ?? "dev-only-internal-secret-override-in-every-real-environment";
 
 /**
  * The sync service never talks to Postgres directly (Section 4's architecture split) —

@@ -90,7 +90,9 @@ export class CollabProvider {
     }
     if (!this.shouldReconnect) return;
 
-    const ws = new WebSocket(`${SYNC_SERVICE_WS_URL}/sync/${this.documentId}?token=${encodeURIComponent(token)}`);
+    const ws = new WebSocket(
+      `${SYNC_SERVICE_WS_URL}/sync/${this.documentId}?token=${encodeURIComponent(token)}`,
+    );
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
 import * as awarenessProtocol from "y-protocols/awareness";
-import * as encoding from "lib0/encoding";
 import * as decoding from "lib0/decoding";
 
 const fetchSnapshot = vi.fn();

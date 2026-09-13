@@ -272,7 +272,10 @@ export function Whiteboard({
           />
         );
       case "path": {
-        const pts = shape.points.reduce<string>((acc, v, i) => acc + (i % 2 === 0 ? `${i ? " " : ""}${v},` : `${v}`), "");
+        const pts = shape.points.reduce<string>(
+          (acc, v, i) => acc + (i % 2 === 0 ? `${i ? " " : ""}${v},` : `${v}`),
+          "",
+        );
         return (
           <polyline
             key={shape.id}
@@ -360,8 +363,12 @@ export function Whiteboard({
 
             {selectedShape && (
               <rect
-                x={selectedShape.type === "path" ? pathBounds(selectedShape.points).x - 6 : selectedShape.x - 6}
-                y={selectedShape.type === "path" ? pathBounds(selectedShape.points).y - 6 : selectedShape.y - 6}
+                x={
+                  selectedShape.type === "path" ? pathBounds(selectedShape.points).x - 6 : selectedShape.x - 6
+                }
+                y={
+                  selectedShape.type === "path" ? pathBounds(selectedShape.points).y - 6 : selectedShape.y - 6
+                }
                 width={
                   (selectedShape.type === "path"
                     ? pathBounds(selectedShape.points).width
@@ -388,7 +395,10 @@ export function Whiteboard({
                 className="pointer-events-none absolute z-10 flex items-center gap-1"
                 style={{ left: state.cursor.x, top: state.cursor.y, transform: "translate(-2px, -2px)" }}
               >
-                <div className="h-3 w-3 rounded-full border-2 border-white" style={{ backgroundColor: state.user.color }} />
+                <div
+                  className="h-3 w-3 rounded-full border-2 border-white"
+                  style={{ backgroundColor: state.user.color }}
+                />
                 <span
                   className="rounded px-1.5 py-0.5 text-xs font-medium text-white shadow"
                   style={{ backgroundColor: state.user.color }}

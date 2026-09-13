@@ -193,6 +193,122 @@ assume anything beyond what's listed as done below actually works.
 Never claim a later phase or a Tier 3 feature (Section 3) as done until it's actually built
 and tested.
 
+## Gap analysis follow-up
+
+A separate review (`CoCanvas_Gap_Analysis.pdf`, built from the build-status report above
+rather than the code itself) flagged a prioritized list of concurrency, security, OOP/OS/DBMS,
+and project-structure items to verify or fix. Each was checked against the actual code —
+some were genuine gaps and got fixed; others turned out to already be handled correctly, and
+are recorded here as verified rather than silently ignored.
+
+**Fixed:**
+
+- **WebSocket Origin validation** (`sync-service/src/security/originCheck.ts`) — the WS
+  upgrade handler had no Origin check at all, meaning any website could open a connection
+  using a victim's own browser session. Now validated against `CORS_ALLOWED_ORIGINS`; a
+  *missing* Origin (non-browser clients — our own scripts, server-to-server) is allowed
+  through, since that's not the attack this check defends against. Verified live: a forged
+  `Origin: https://evil.example.com` gets a real 403 at the WS handshake.
+- **Presence cleanup on ungraceful disconnect** — a client that vanishes without a clean
+  close (dead WiFi, closed laptop) never fired the `close` event that drives presence
+  cleanup, so its cursor could stay visible indefinitely. Fixed with a ping/pong heartbeat
+  (`server.ts`, 30s interval) — a missed pong terminates the connection, which *does* fire
+  `close` and runs the normal cleanup path.
+- **Backpressure** — no cap existed on either message size or message rate per WebSocket
+  connection, so one fast or buggy client could degrade a shared room for everyone in it.
+  Fixed with `maxPayload` (1MB, enforced by the `ws` library itself) and a hand-rolled
+  per-connection sliding-window rate limiter (`security/messageRateLimiter.ts`, 50
+  msgs/sec, mirroring the Core API's own `RateLimiter` design).
+- **Graceful shutdown** — the Sync Service had no signal handling at all; a routine
+  restart could silently drop whatever was sitting behind a debounced snapshot write.
+  Fixed with a `SIGTERM`/`SIGINT` handler that stops accepting new connections and flushes
+  every live room's current state before exiting (`roomManager.ts`'s `flushAllRooms`).
+  Verified live: wrote content, sent a real `SIGTERM` to the container well before the
+  normal debounce would have fired, confirmed `"all pending snapshots flushed"` in the
+  logs, and reconnected after restart to confirm the content was actually there.
+- **`documentType` polymorphism was actually an if/else** — the gap analysis correctly
+  called this out: "type-aware restore" *sounded* like polymorphism but `restoreLiveRoom`
+  branched with a plain `if (room.documentType === "WHITEBOARD")`. Refactored into a real
+  strategy per type (`rooms/documentTypeStrategy.ts`, a `DocumentTypeStrategy` interface
+  with `TextDocumentStrategy`/`WhiteboardDocumentStrategy`, resolved by a factory lookup) —
+  now a genuine example, not just language that implied one.
+- **Convergence test scale** — added a 40-client text test and scaled the whiteboard
+  randomized test to 30 clients, both with recorded convergence latency asserted under a
+  sanity bound (`sync-service/test/convergence.test.ts`), alongside the original 5-client
+  tests rather than replacing them.
+- **Project structure**: `.env.example` expanded to cover every variable both backend
+  services actually read (it only listed a handful before); Docker Compose healthcheck
+  directives added for `core-api`, `sync-service`, and `frontend` (previously only
+  `postgres`/`redis` had them — `depends_on` conditions upgraded to `service_healthy`
+  accordingly); a `LICENSE` (MIT) file; a `.github/dependabot.yml` covering Maven, both npm
+  projects, Docker, and GitHub Actions.
+- **Lint/format CI gates** across all three codebases — ESLint + Prettier for the Sync
+  Service (newly added) and the frontend (dependency existed, config file didn't), and
+  google-java-format via the Spotless Maven plugin for the Core API. Running Spotless for
+  the first time reformatted ~70 existing files (whitespace/import-order only, verified
+  with a full rebuild + test run afterward) — a one-time cost of adopting a formatter this
+  late, not a sign of anything wrong.
+
+**Verified already correct — no gap found:**
+
+- **Rate limiter atomicity** — the gap analysis assumed a Redis-based limiter and worried
+  about a non-atomic read-then-write race. The actual `RateLimiter` (Core API) is
+  in-process, keyed per string, and every read-then-write happens inside
+  `synchronized (timestamps)` on that key's own deque — already correctly atomic under
+  concurrent requests. (This would need revisiting only if the Core API were ever scaled
+  to multiple instances, which is explicitly out of scope — Section 3 Tier 3.)
+- **Snapshot-write atomicity vs. live edits** — `Y.encodeStateAsUpdate(room.doc)` is
+  called synchronously, as the first line of `persistNow`, before any `await`. JavaScript's
+  single-threaded event loop means nothing else can run between that call and its return,
+  so a torn read isn't possible.
+- **Collab-token replay/scope** — `verifyCollabToken` already checks signature, expiry
+  (via `jwt.verify`'s built-in `exp` handling), and that `documentId` matches the one
+  being connected to; a token for one document is already rejected for another.
+- **XSS via collaborative content** — audited both editors for `dangerouslySetInnerHTML`
+  (none exist anywhere in `frontend/`); the document editor uses a `<textarea>`'s `.value`
+  and the whiteboard's sticky-note text renders as a React child (both are escaped by
+  React/the DOM by construction, not by any manual escaping this project has to maintain).
+- **Reconnect race during collab-token refresh** — the frontend's `CollabProvider` only
+  calls `connect()` again from inside the *old* socket's own `onclose` handler, never
+  preemptively — so a reconnect can't open a new connection while the old one is still
+  draining, and there's no window for duplicate room membership from this path.
+- **Encapsulation (the hand-rolled collab provider)** and **abstraction (the `/internal/**`
+  single-write-path)** — both cited by the gap analysis as likely genuine OOP examples —
+  checked and confirmed: `CollabProvider` exposes only `doc`/`awareness`/`destroy()`
+  with the token-refresh-on-reconnect logic fully private, and the Sync Service never
+  writes to Postgres directly, only ever through the Core API's `/internal/**` endpoints.
+
+**Verified with real data, not just reasoning:**
+
+- **`EXPLAIN ANALYZE` on `document_snapshots`/`document_permissions`** — seeded a
+  representative volume (500 users, 200 documents, ~1,000 permission rows, 6,000 snapshot
+  rows) into a real Postgres and ran the actual repository query patterns. All four use
+  their existing indexes correctly (`idx_document_permissions_document_user`,
+  `idx_document_permissions_user_id`, `idx_document_snapshots_document_id`) — no seq
+  scans on the real query paths. The version-history list query sorts in memory rather
+  than via an index on `(document_id, created_at)`, which is fine at the realistic scale
+  of "named versions of one document" (tens, not thousands) — Postgres's planner already
+  chooses the index-then-sort path here over a seq scan.
+
+**Accepted tradeoff, documented rather than "fixed":**
+
+- **`/internal/**` endpoint exposure** — both services' internal routes share the same
+  HTTP port as their public traffic (`8080`/`4000`), and that port is published to the
+  host in `docker-compose.yml` because the public traffic on it has to be. Splitting
+  internal routes onto a genuinely separate, unpublished port would mean a second Tomcat
+  connector (Core API) and a second HTTP listener (Sync Service) — real infrastructure
+  work disproportionate to what a shared-secret header (`InternalServiceAuthFilter`,
+  `X-Internal-Secret`) already defends against correctly. The shared secret — not network
+  isolation — is the actual, intentional defense here; a production deployment behind a
+  reverse proxy would additionally block `/internal/**` from external routing, which is
+  what the "Deployment" section below already describes as unexecuted from this
+  environment.
+
+Everything from the original blueprint's own Security & Advanced Engineering Addendum that
+isn't listed as done anywhere in this README (security headers, JWT algorithm pinning,
+cross-service session revocation via Redis pub/sub) is still open — this pass didn't
+change that list, only added to it.
+
 ## Repository layout
 
 ```
