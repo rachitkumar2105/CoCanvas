@@ -64,7 +64,7 @@ describe("roomManager", () => {
     seed.getText("body").insert(0, "hydrated content");
     fetchSnapshot.mockResolvedValue(Y.encodeStateAsUpdate(seed));
 
-    const room = await getOrCreateRoom("doc-hydrate");
+    const room = await getOrCreateRoom("doc-hydrate", "DOCUMENT");
 
     expect(room.doc.getText("body").toString()).toBe("hydrated content");
     expect(fetchSnapshot).toHaveBeenCalledWith("doc-hydrate");
@@ -72,13 +72,13 @@ describe("roomManager", () => {
 
   it("starts an empty doc when the Core API has no snapshot yet", async () => {
     fetchSnapshot.mockResolvedValue(null);
-    const room = await getOrCreateRoom("doc-empty");
+    const room = await getOrCreateRoom("doc-empty", "DOCUMENT");
     expect(room.doc.getText("body").toString()).toBe("");
   });
 
   it("broadcasts an update to other connections but not back to its origin", async () => {
     fetchSnapshot.mockResolvedValue(null);
-    const room = await getOrCreateRoom("doc-broadcast");
+    const room = await getOrCreateRoom("doc-broadcast", "DOCUMENT");
 
     const writer = fakeSocket();
     const listener = fakeSocket();
@@ -95,7 +95,7 @@ describe("roomManager", () => {
 
   it("debounces persistence while the room stays active", async () => {
     fetchSnapshot.mockResolvedValue(null);
-    const room = await getOrCreateRoom("doc-debounce");
+    const room = await getOrCreateRoom("doc-debounce", "DOCUMENT");
     const conn = fakeSocket();
     addConnection(room, conn, "EDITOR");
 
@@ -114,7 +114,7 @@ describe("roomManager", () => {
 
   it("persists immediately when the last connection disconnects, and tears the room down", async () => {
     fetchSnapshot.mockResolvedValue(null);
-    const room = await getOrCreateRoom("doc-last-disconnect");
+    const room = await getOrCreateRoom("doc-last-disconnect", "DOCUMENT");
     const conn = fakeSocket();
     addConnection(room, conn, "OWNER");
 
@@ -127,7 +127,7 @@ describe("roomManager", () => {
 
   it("does not tear the room down while other connections remain", async () => {
     fetchSnapshot.mockResolvedValue(null);
-    const room = await getOrCreateRoom("doc-multi-conn");
+    const room = await getOrCreateRoom("doc-multi-conn", "DOCUMENT");
     const a = fakeSocket();
     const b = fakeSocket();
     addConnection(room, a, "EDITOR");
@@ -142,7 +142,7 @@ describe("roomManager", () => {
   describe("presence / awareness", () => {
     it("relays an incoming awareness update to other connections but not back to its sender", async () => {
       fetchSnapshot.mockResolvedValue(null);
-      const room = await getOrCreateRoom("doc-awareness-broadcast");
+      const room = await getOrCreateRoom("doc-awareness-broadcast", "DOCUMENT");
       const alice = fakeSocket();
       const bob = fakeSocket();
       addConnection(room, alice, "EDITOR");
@@ -163,13 +163,13 @@ describe("roomManager", () => {
 
     it("returns null (nothing to send) for a brand-new room with no known participants", async () => {
       fetchSnapshot.mockResolvedValue(null);
-      const room = await getOrCreateRoom("doc-awareness-empty");
+      const room = await getOrCreateRoom("doc-awareness-empty", "DOCUMENT");
       expect(encodeFullAwarenessState(room)).toBeNull();
     });
 
     it("encodes every known participant's state for a client joining later", async () => {
       fetchSnapshot.mockResolvedValue(null);
-      const room = await getOrCreateRoom("doc-awareness-snapshot");
+      const room = await getOrCreateRoom("doc-awareness-snapshot", "DOCUMENT");
       const alice = fakeSocket();
       addConnection(room, alice, "EDITOR");
       applyAwarenessUpdate(room, alice, makeAwarenessUpdate(1, { name: "Alice" }));
@@ -186,7 +186,7 @@ describe("roomManager", () => {
 
     it("removes a connection's awareness state (e.g. its cursor) when it disconnects", async () => {
       fetchSnapshot.mockResolvedValue(null);
-      const room = await getOrCreateRoom("doc-awareness-cleanup");
+      const room = await getOrCreateRoom("doc-awareness-cleanup", "DOCUMENT");
       const alice = fakeSocket();
       const bob = fakeSocket();
       addConnection(room, alice, "EDITOR");
@@ -207,7 +207,7 @@ describe("roomManager", () => {
   describe("restoreLiveRoom", () => {
     it("replaces the live doc's content, broadcasts it, and schedules a persist", async () => {
       fetchSnapshot.mockResolvedValue(null);
-      const room = await getOrCreateRoom("doc-restore-live");
+      const room = await getOrCreateRoom("doc-restore-live", "DOCUMENT");
       room.doc.getText("body").insert(0, "current content that has since diverged");
 
       const conn = fakeSocket();
@@ -232,6 +232,29 @@ describe("roomManager", () => {
     it("returns false when the document isn't currently loaded in memory", () => {
       const applied = restoreLiveRoom("doc-not-loaded", new Uint8Array());
       expect(applied).toBe(false);
+    });
+
+    it("restores a WHITEBOARD room's shapes map, not its text", async () => {
+      fetchSnapshot.mockResolvedValue(null);
+      const room = await getOrCreateRoom("doc-restore-whiteboard", "WHITEBOARD");
+      room.doc.getMap("shapes").set("shape-1", { id: "shape-1", type: "rect", x: 999, y: 999 });
+      room.doc.getMap("shapes").set("shape-2", { id: "shape-2", type: "circle", x: 5, y: 5 });
+
+      const conn = fakeSocket();
+      addConnection(room, conn, "EDITOR");
+
+      const oldVersion = new Y.Doc();
+      oldVersion.getMap("shapes").set("shape-1", { id: "shape-1", type: "rect", x: 10, y: 20 });
+      const restoredState = Y.encodeStateAsUpdate(oldVersion);
+      oldVersion.destroy();
+
+      const applied = restoreLiveRoom("doc-restore-whiteboard", restoredState);
+
+      expect(applied).toBe(true);
+      const shapes = room.doc.getMap("shapes");
+      expect(shapes.size).toBe(1);
+      expect(shapes.get("shape-1")).toEqual({ id: "shape-1", type: "rect", x: 10, y: 20 });
+      expect(shapes.has("shape-2")).toBe(false); // cleared, not merged
     });
   });
 });

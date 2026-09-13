@@ -1,11 +1,13 @@
 import jwt from "jsonwebtoken";
 
 export type DocumentRole = "OWNER" | "EDITOR" | "VIEWER";
+export type DocumentType = "DOCUMENT" | "WHITEBOARD";
 
 export interface CollabClaims {
   userId: string;
   documentId: string;
   role: DocumentRole;
+  documentType: DocumentType;
 }
 
 export class CollabTokenError extends Error {}
@@ -41,6 +43,10 @@ export function verifyCollabToken(token: string, expectedDocumentId: string, sec
   if (role !== "OWNER" && role !== "EDITOR" && role !== "VIEWER") {
     throw new CollabTokenError("Missing or invalid role claim");
   }
+  const documentType = payload.documentType;
+  if (documentType !== "DOCUMENT" && documentType !== "WHITEBOARD") {
+    throw new CollabTokenError("Missing or invalid documentType claim");
+  }
 
-  return { userId: payload.sub, documentId: payload.documentId, role };
+  return { userId: payload.sub, documentId: payload.documentId, role, documentType };
 }

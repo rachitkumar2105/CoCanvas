@@ -11,6 +11,7 @@ function makeToken(overrides: Record<string, unknown> = {}, opts: jwt.SignOption
     {
       documentId: DOCUMENT_ID,
       role: "EDITOR",
+      documentType: "DOCUMENT",
       type: "collab",
       ...overrides,
     },
@@ -23,7 +24,18 @@ describe("verifyCollabToken", () => {
   it("accepts a well-formed token scoped to the right document", () => {
     const token = makeToken();
     const claims = verifyCollabToken(token, DOCUMENT_ID, SECRET);
-    expect(claims).toEqual({ userId: USER_ID, documentId: DOCUMENT_ID, role: "EDITOR" });
+    expect(claims).toEqual({ userId: USER_ID, documentId: DOCUMENT_ID, role: "EDITOR", documentType: "DOCUMENT" });
+  });
+
+  it("accepts a WHITEBOARD-scoped token", () => {
+    const token = makeToken({ documentType: "WHITEBOARD" });
+    const claims = verifyCollabToken(token, DOCUMENT_ID, SECRET);
+    expect(claims.documentType).toBe("WHITEBOARD");
+  });
+
+  it("rejects a token with a missing or invalid documentType", () => {
+    const token = makeToken({ documentType: "SPREADSHEET" });
+    expect(() => verifyCollabToken(token, DOCUMENT_ID, SECRET)).toThrow(/documentType/);
   });
 
   it("accepts tokens signed with HS256, HS384, or HS512 (Core API's key-length-dependent algorithm)", () => {

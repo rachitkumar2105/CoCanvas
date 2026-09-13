@@ -41,15 +41,18 @@ public class JwtService {
     }
 
     /**
-     * Encodes (userId, documentId, role, exp) so the sync service can authorize a
-     * WebSocket session without calling back into the Core API on every message.
+     * Encodes (userId, documentId, role, documentType, exp) so the sync service can
+     * authorize a WebSocket session — and pick the right shared Yjs type for the
+     * document (Y.Text for DOCUMENT, Y.Map for WHITEBOARD, Section 5) — without
+     * calling back into the Core API on every message.
      */
-    public String generateCollabToken(UUID userId, UUID documentId, String role, long ttlSeconds) {
+    public String generateCollabToken(UUID userId, UUID documentId, String role, String documentType, long ttlSeconds) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(userId.toString())
                 .claim("documentId", documentId.toString())
                 .claim("role", role)
+                .claim("documentType", documentType)
                 .claim("type", "collab")
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(ttlSeconds)))

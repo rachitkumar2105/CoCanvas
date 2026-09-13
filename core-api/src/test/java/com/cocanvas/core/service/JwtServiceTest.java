@@ -42,15 +42,16 @@ class JwtServiceTest {
     }
 
     @Test
-    void collabTokenEncodesDocumentIdAndRole() {
+    void collabTokenEncodesDocumentIdRoleAndDocumentType() {
         UUID userId = UUID.randomUUID();
         UUID documentId = UUID.randomUUID();
-        String token = jwtService.generateCollabToken(userId, documentId, "EDITOR", 60);
+        String token = jwtService.generateCollabToken(userId, documentId, "EDITOR", "WHITEBOARD", 60);
 
         var claims = jwtService.parseClaims(token);
         assertThat(claims.getSubject()).isEqualTo(userId.toString());
         assertThat(claims.get("documentId")).isEqualTo(documentId.toString());
         assertThat(claims.get("role")).isEqualTo("EDITOR");
+        assertThat(claims.get("documentType")).isEqualTo("WHITEBOARD");
         assertThat(claims.get("type")).isEqualTo("collab");
     }
 }

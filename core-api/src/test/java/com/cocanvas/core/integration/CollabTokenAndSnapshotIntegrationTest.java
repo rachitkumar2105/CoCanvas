@@ -67,6 +67,7 @@ class CollabTokenAndSnapshotIntegrationTest extends AbstractIntegrationTest {
         JsonNode claims = objectMapper.readTree(Base64.getUrlDecoder().decode(parts[1]));
         assert claims.get("documentId").asText().equals(doc.documentId());
         assert claims.get("role").asText().equals("OWNER");
+        assert claims.get("documentType").asText().equals("DOCUMENT");
         assert claims.get("type").asText().equals("collab");
 
         mockMvc.perform(post("/api/documents/" + doc.documentId() + "/collab-token")

@@ -39,7 +39,7 @@ describe("relay VIEWER-write enforcement (Section 10 point 3)", () => {
   });
 
   it("drops an update message from a VIEWER connection without applying it", async () => {
-    const room = await getOrCreateRoom("doc-viewer-write");
+    const room = await getOrCreateRoom("doc-viewer-write", "DOCUMENT");
     const viewer = fakeSocket();
     addConnection(room, viewer, "VIEWER");
 
@@ -57,7 +57,7 @@ describe("relay VIEWER-write enforcement (Section 10 point 3)", () => {
   });
 
   it("still serves a VIEWER's own syncStep1 (read) request", async () => {
-    const room = await getOrCreateRoom("doc-viewer-read");
+    const room = await getOrCreateRoom("doc-viewer-read", "DOCUMENT");
     // Inserted before the viewer joins so this doesn't itself trigger a broadcast to them.
     room.doc.getText("body").insert(0, "existing content");
     const viewer = fakeSocket();
@@ -69,7 +69,7 @@ describe("relay VIEWER-write enforcement (Section 10 point 3)", () => {
   });
 
   it("applies an update message from an EDITOR connection", async () => {
-    const room = await getOrCreateRoom("doc-editor-write");
+    const room = await getOrCreateRoom("doc-editor-write", "DOCUMENT");
     const editor = fakeSocket();
     addConnection(room, editor, "EDITOR");
 
@@ -85,7 +85,7 @@ describe("relay VIEWER-write enforcement (Section 10 point 3)", () => {
   });
 
   it("applies an update message from an OWNER connection", async () => {
-    const room = await getOrCreateRoom("doc-owner-write");
+    const room = await getOrCreateRoom("doc-owner-write", "DOCUMENT");
     const owner = fakeSocket();
     addConnection(room, owner, "OWNER");
 

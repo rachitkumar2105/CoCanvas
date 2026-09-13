@@ -51,7 +51,34 @@ assume anything beyond what's listed as done below actually works.
       `docker compose` stack, including catching and fixing a real bug along the way
       (Java's `HttpClient` defaulting to HTTP/2 against a plain HTTP/1.1 Node server,
       which failed silently as "received no bytes" until pinned to HTTP/1.1).
-- [ ] **Phase 5 — Whiteboard mode.**
+- [~] **Phase 5 — Whiteboard mode: backend/protocol only, by deliberate scope decision.**
+      Its literal "done" criterion ("two tabs can draw on the same whiteboard live")
+      is a UI feature, and no frontend exists yet (that's explicitly Phase 6 scope) —
+      building one now would mean bootstrapping a whole Next.js + canvas-library app in
+      one uncontrolled jump, so this phase stops at what the backend actually owns:
+      - A whiteboard's shared Yjs type is a top-level `Y.Map` keyed by shape id
+        (`sync-service/src/rooms/shapes.ts`) rather than the `Y.Text` documents use —
+        documented there, including the real limitation that a shape is replaced
+        atomically rather than merged property-by-property.
+      - The collab-token now carries a `documentType` claim (`DOCUMENT`/`WHITEBOARD`)
+        so the sync service knows which shared type a room uses, threaded through
+        `getOrCreateRoom` and stored on the `Room` for its lifetime.
+      - Restore (Phase 4's feature) is type-aware: `restoreLiveRoom` swaps between the
+        text-replace and shape-map-replace paths depending on `room.documentType`.
+      - VIEWER-write enforcement (Phase 4) already worked for whiteboards for free,
+        since it operates on the generic Yjs sync protocol, not on Y.Text specifically
+        — verified by forging a shape write as a VIEWER against a real running relay.
+      - A convergence test for shapes (`sync-service/test/convergence.test.ts`) mirrors
+        the text one: concurrent shape creation, concurrent edits to the *same* shape,
+        a delete-vs-edit race, and a larger randomized multi-client scenario, all
+        asserting byte-identical final state across every replica.
+      - Verified live end-to-end: created a WHITEBOARD document, drew shapes from a
+        real WS client, killed the sync-service process outright and reconnected
+        (shapes survived), saved a version, diverged further, and watched a live
+        connection's shapes actually change in real time when that version was restored.
+      What's genuinely not built: the canvas UI itself (shape rendering, drag/draw
+      interactions, a library like tldraw or Fabric.js) — that's Phase 6 territory once
+      the frontend exists at all.
 - [ ] **Phase 6 — Redis presence, rate limiting, observability, Docker Compose, CI,
       deployment.** `frontend/` is currently just a folder scaffold — see its README.
 
@@ -158,6 +185,11 @@ UI, which is frontend work).
   mutate the doc is dropped at the relay (`sync-service/src/relay.ts`) before it ever
   reaches the shared `Y.Doc` — enforced independently of whatever the frontend's UI
   happens to allow.
+- A room's shared Yjs type depends on the document's type, carried in the collab-token's
+  `documentType` claim: `Y.Text("body")` for DOCUMENT, a `Y.Map("shapes")` of shape
+  records for WHITEBOARD (`sync-service/src/rooms/shapes.ts`) — the relay itself doesn't
+  care either way, since the Yjs sync protocol operates on the whole doc's state
+  regardless of what shared types live inside it; only restore needs to know which one.
 - Not yet done: real update-log compaction (collapsing Yjs's own internal structure, as
   opposed to the Postgres-row compaction Phase 4 already does) — Section 10 point 2,
   still open for a later phase if a long-lived, extremely active document's in-memory

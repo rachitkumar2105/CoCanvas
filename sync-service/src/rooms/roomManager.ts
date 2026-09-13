@@ -3,7 +3,8 @@ import type { WebSocket } from "ws";
 import * as encoding from "lib0/encoding";
 import * as awarenessProtocol from "y-protocols/awareness";
 import { fetchSnapshot, saveSnapshot } from "../persistence/coreApiClient.js";
-import type { DocumentRole } from "../auth/collabToken.js";
+import type { DocumentRole, DocumentType } from "../auth/collabToken.js";
+import { getShapesMap } from "./shapes.js";
 
 export const messageSync = 0;
 export const messageAwareness = 1;
@@ -16,6 +17,8 @@ interface ConnMeta {
 
 export interface Room {
   documentId: string;
+  /** Fixed for the room's lifetime — set from whichever connection creates it (Section 5). */
+  documentType: DocumentType;
   doc: Y.Doc;
   awareness: awarenessProtocol.Awareness;
   conns: Map<WebSocket, ConnMeta>;
@@ -89,7 +92,7 @@ async function persistNow(room: Room): Promise<void> {
   await saveSnapshot(room.documentId, state);
 }
 
-export async function getOrCreateRoom(documentId: string): Promise<Room> {
+export async function getOrCreateRoom(documentId: string, documentType: DocumentType): Promise<Room> {
   const existing = rooms.get(documentId);
   if (existing) {
     await existing.ready;
@@ -104,6 +107,7 @@ export async function getOrCreateRoom(documentId: string): Promise<Room> {
 
   const room: Room = {
     documentId,
+    documentType,
     doc,
     awareness,
     conns: new Map(),
@@ -206,15 +210,24 @@ export function restoreLiveRoom(documentId: string, restoredState: Uint8Array): 
 
   const temp = new Y.Doc();
   Y.applyUpdate(temp, restoredState);
-  const restoredText = temp.getText("body").toString();
+
+  if (room.documentType === "WHITEBOARD") {
+    const restoredShapes = getShapesMap(temp);
+    room.doc.transact(() => {
+      const shapes = getShapesMap(room.doc);
+      shapes.clear();
+      restoredShapes.forEach((shape, id) => shapes.set(id, shape));
+    }, "restore");
+  } else {
+    const restoredText = temp.getText("body").toString();
+    room.doc.transact(() => {
+      const text = room.doc.getText("body");
+      text.delete(0, text.length);
+      text.insert(0, restoredText);
+    }, "restore");
+  }
+
   temp.destroy();
-
-  room.doc.transact(() => {
-    const text = room.doc.getText("body");
-    text.delete(0, text.length);
-    text.insert(0, restoredText);
-  }, "restore");
-
   return true;
 }
 

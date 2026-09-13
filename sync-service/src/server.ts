@@ -50,7 +50,12 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
-wss.on("connection", (ws: WebSocket, documentId: string, role: ReturnType<typeof verifyCollabToken>["role"]) => {
+wss.on("connection", (
+  ws: WebSocket,
+  documentId: string,
+  role: ReturnType<typeof verifyCollabToken>["role"],
+  documentType: ReturnType<typeof verifyCollabToken>["documentType"]
+) => {
   // getOrCreateRoom is async (it may hydrate from the Core API), but a client sends
   // its first sync message the instant the connection opens — attaching `message`/
   // `close` listeners only after that await resolves would lose whatever arrives in
@@ -80,7 +85,7 @@ wss.on("connection", (ws: WebSocket, documentId: string, role: ReturnType<typeof
     console.error(`[document ${documentId}] websocket error:`, err);
   });
 
-  getOrCreateRoom(documentId)
+  getOrCreateRoom(documentId, documentType)
     .then((r) => {
       room = r;
       addConnection(room, ws, role);
@@ -124,7 +129,7 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit("connection", ws, documentId, claims.role);
+    wss.emit("connection", ws, documentId, claims.role, claims.documentType);
   });
 });
 

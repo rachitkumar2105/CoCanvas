@@ -137,3 +137,110 @@ describe("Yjs convergence under concurrent, delayed, interleaved edits", () => {
     b.destroy();
   });
 });
+
+/**
+ * Phase 5's whiteboard shape model (Section 5) is a top-level Y.Map keyed by shape id
+ * (sync-service/src/rooms/shapes.ts) rather than the Y.Text used for documents — this
+ * is the same convergence guarantee applied to that data shape: concurrent, delayed,
+ * conflicting shape edits from multiple simulated clients must still converge to a
+ * byte-identical final state everywhere.
+ */
+describe("Yjs convergence for whiteboard shapes (Y.Map)", () => {
+  function shapesOf(doc: Y.Doc) {
+    return doc.getMap<Record<string, unknown>>("shapes");
+  }
+
+  it("converges when clients concurrently create different shapes", async () => {
+    const CLIENT_COUNT = 4;
+    const docs = Array.from({ length: CLIENT_COUNT }, () => new Y.Doc());
+    const network = simulateNetwork(docs);
+
+    docs.forEach((doc, i) => {
+      shapesOf(doc).set(`shape-${i}`, { id: `shape-${i}`, type: "rect", x: i * 10, y: i * 10 });
+    });
+
+    await network.flush();
+
+    const referenceState = Y.encodeStateAsUpdate(docs[0]);
+    for (let i = 1; i < docs.length; i++) {
+      expect(Y.encodeStateAsUpdate(docs[i])).toEqual(referenceState);
+      expect(shapesOf(docs[i]).size).toBe(CLIENT_COUNT);
+    }
+
+    docs.forEach((doc) => doc.destroy());
+  });
+
+  it("converges to the same winner when two clients concurrently move the same shape", async () => {
+    const a = new Y.Doc();
+    const b = new Y.Doc();
+    shapesOf(a).set("shape-1", { id: "shape-1", type: "circle", x: 0, y: 0 });
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const network = simulateNetwork([a, b]);
+
+    // Both clients drag the SAME shape to different positions at the same time —
+    // Y.Map resolves this the same way any other concurrent same-key write resolves:
+    // one deterministic winner, identical on every replica, no error, no merge of the
+    // two positions into something nonsensical.
+    shapesOf(a).set("shape-1", { id: "shape-1", type: "circle", x: 100, y: 5 });
+    shapesOf(b).set("shape-1", { id: "shape-1", type: "circle", x: 5, y: 100 });
+
+    await network.flush();
+
+    expect(Y.encodeStateAsUpdate(a)).toEqual(Y.encodeStateAsUpdate(b));
+    expect(shapesOf(a).get("shape-1")).toEqual(shapesOf(b).get("shape-1"));
+
+    a.destroy();
+    b.destroy();
+  });
+
+  it("converges when one client deletes a shape another client concurrently edited", async () => {
+    const a = new Y.Doc();
+    const b = new Y.Doc();
+    shapesOf(a).set("shape-1", { id: "shape-1", type: "rect", x: 0, y: 0 });
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a));
+
+    const network = simulateNetwork([a, b]);
+
+    shapesOf(a).delete("shape-1");
+    shapesOf(b).set("shape-1", { id: "shape-1", type: "rect", x: 50, y: 50 });
+
+    await network.flush();
+
+    expect(Y.encodeStateAsUpdate(a)).toEqual(Y.encodeStateAsUpdate(b));
+    // Whichever way Yjs resolves a delete-vs-set race, both replicas must agree.
+    expect(shapesOf(a).has("shape-1")).toBe(shapesOf(b).has("shape-1"));
+
+    a.destroy();
+    b.destroy();
+  });
+
+  it("converges across many clients with randomized, interleaved, delayed shape edits", async () => {
+    const CLIENT_COUNT = 5;
+    const EDITS_PER_CLIENT = 10;
+    const SHARED_SHAPE_IDS = ["shape-a", "shape-b", "shape-c"];
+    const docs = Array.from({ length: CLIENT_COUNT }, () => new Y.Doc());
+    const network = simulateNetwork(docs);
+
+    docs.forEach((doc, clientIndex) => {
+      const shapes = shapesOf(doc);
+      for (let edit = 0; edit < EDITS_PER_CLIENT; edit++) {
+        const id = SHARED_SHAPE_IDS[Math.floor(Math.random() * SHARED_SHAPE_IDS.length)];
+        if (Math.random() < 0.2) {
+          shapes.delete(id);
+        } else {
+          shapes.set(id, { id, type: "rect", x: clientIndex, y: edit, updatedBy: clientIndex });
+        }
+      }
+    });
+
+    await network.flush();
+
+    const referenceState = Y.encodeStateAsUpdate(docs[0]);
+    for (let i = 1; i < docs.length; i++) {
+      expect(Y.encodeStateAsUpdate(docs[i])).toEqual(referenceState);
+    }
+
+    docs.forEach((doc) => doc.destroy());
+  });
+});

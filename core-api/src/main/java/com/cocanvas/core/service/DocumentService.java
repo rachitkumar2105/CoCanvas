@@ -133,10 +133,10 @@ public class DocumentService {
      */
     @Transactional(readOnly = true)
     public CollabTokenResponse issueCollabToken(UUID documentId, UUID userId) {
-        getDocumentOrThrow(documentId);
+        Document document = getDocumentOrThrow(documentId);
         DocumentRole role = requireDocumentRole(documentId, userId);
         long ttl = jwtProperties.collabTokenTtlSeconds();
-        String token = jwtService.generateCollabToken(userId, documentId, role.name(), ttl);
+        String token = jwtService.generateCollabToken(userId, documentId, role.name(), document.getType().name(), ttl);
         return new CollabTokenResponse(token, ttl);
     }
 
