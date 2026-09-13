@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class JwtServiceTest {
 
     private final JwtProperties properties = new JwtProperties(
-            "unit-test-signing-secret-at-least-32-bytes-long", 900, 1_209_600);
+            "unit-test-signing-secret-at-least-32-bytes-long", 900, 1_209_600, 60);
     private final JwtService jwtService = new JwtService(properties);
 
     @Test
@@ -28,7 +28,7 @@ class JwtServiceTest {
     @Test
     void rejectsTokenSignedWithADifferentSecret() {
         JwtProperties otherProperties = new JwtProperties(
-                "a-completely-different-signing-secret-32-bytes!", 900, 1_209_600);
+                "a-completely-different-signing-secret-32-bytes!", 900, 1_209_600, 60);
         JwtService otherService = new JwtService(otherProperties);
 
         String token = otherService.generateAccessToken(UUID.randomUUID(), "x@example.com");
@@ -39,5 +39,18 @@ class JwtServiceTest {
     @Test
     void rejectsGarbageToken() {
         assertThatThrownBy(() -> jwtService.parseClaims("not-a-jwt")).isInstanceOf(JwtException.class);
+    }
+
+    @Test
+    void collabTokenEncodesDocumentIdAndRole() {
+        UUID userId = UUID.randomUUID();
+        UUID documentId = UUID.randomUUID();
+        String token = jwtService.generateCollabToken(userId, documentId, "EDITOR", 60);
+
+        var claims = jwtService.parseClaims(token);
+        assertThat(claims.getSubject()).isEqualTo(userId.toString());
+        assertThat(claims.get("documentId")).isEqualTo(documentId.toString());
+        assertThat(claims.get("role")).isEqualTo("EDITOR");
+        assertThat(claims.get("type")).isEqualTo("collab");
     }
 }

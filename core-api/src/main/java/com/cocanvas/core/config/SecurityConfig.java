@@ -1,5 +1,6 @@
 package com.cocanvas.core.config;
 
+import com.cocanvas.core.security.InternalServiceAuthFilter;
 import com.cocanvas.core.security.JwtAuthFilter;
 import com.cocanvas.core.security.RestAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
@@ -23,12 +24,16 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final InternalServiceAuthFilter internalServiceAuthFilter;
     private final CorsProperties corsProperties;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter, CorsProperties corsProperties,
+    public SecurityConfig(JwtAuthFilter jwtAuthFilter,
+                           InternalServiceAuthFilter internalServiceAuthFilter,
+                           CorsProperties corsProperties,
                            RestAuthenticationEntryPoint authenticationEntryPoint) {
         this.jwtAuthFilter = jwtAuthFilter;
+        this.internalServiceAuthFilter = internalServiceAuthFilter;
         this.corsProperties = corsProperties;
         this.authenticationEntryPoint = authenticationEntryPoint;
     }
@@ -53,9 +58,15 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                         .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                        // Not actually open — InternalServiceAuthFilter below rejects anything
+                        // without the shared secret before it reaches a controller. This is
+                        // service-to-service trust, not a user session, so it sits outside
+                        // the JWT-authenticated rule below.
+                        .requestMatchers("/internal/**").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .anyRequest().authenticated()
                 )
+                .addFilterBefore(internalServiceAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

@@ -1,5 +1,6 @@
 package com.cocanvas.core.controller;
 
+import com.cocanvas.core.dto.document.CollabTokenResponse;
 import com.cocanvas.core.dto.document.CreateDocumentRequest;
 import com.cocanvas.core.dto.document.DocumentResponse;
 import com.cocanvas.core.dto.document.ShareDocumentRequest;
@@ -55,5 +56,10 @@ public class DocumentController {
                        @PathVariable UUID documentId,
                        @Valid @RequestBody ShareDocumentRequest request) {
         documentService.shareDocument(documentId, user.id(), request);
+    }
+
+    @PostMapping("/api/documents/{documentId}/collab-token")
+    public CollabTokenResponse collabToken(@AuthenticationPrincipal CurrentUser user, @PathVariable UUID documentId) {
+        return documentService.issueCollabToken(documentId, user.id());
     }
 }

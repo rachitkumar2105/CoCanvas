@@ -13,8 +13,9 @@ import java.util.Date;
 import java.util.UUID;
 
 /**
- * Issues and verifies the access token used by the frontend. Document-scoped
- * collab-token issuance for the sync service (Section 8) lands in the Phase 2 build.
+ * Issues and verifies the access token used by the frontend, and the short-lived
+ * document-scoped "collab token" the sync service verifies independently on
+ * WebSocket connect (Section 8) — no database round trip on that hot path.
  */
 @Service
 public class JwtService {
@@ -35,6 +36,23 @@ public class JwtService {
                 .claim("type", "access")
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plusSeconds(properties.accessTokenTtlSeconds())))
+                .signWith(signingKey)
+                .compact();
+    }
+
+    /**
+     * Encodes (userId, documentId, role, exp) so the sync service can authorize a
+     * WebSocket session without calling back into the Core API on every message.
+     */
+    public String generateCollabToken(UUID userId, UUID documentId, String role, long ttlSeconds) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(userId.toString())
+                .claim("documentId", documentId.toString())
+                .claim("role", role)
+                .claim("type", "collab")
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusSeconds(ttlSeconds)))
                 .signWith(signingKey)
                 .compact();
     }

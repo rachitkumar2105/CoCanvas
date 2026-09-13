@@ -1,5 +1,7 @@
 package com.cocanvas.core.service;
 
+import com.cocanvas.core.config.JwtProperties;
+import com.cocanvas.core.dto.document.CollabTokenResponse;
 import com.cocanvas.core.dto.document.CreateDocumentRequest;
 import com.cocanvas.core.dto.document.DocumentResponse;
 import com.cocanvas.core.dto.document.ShareDocumentRequest;
@@ -13,6 +15,7 @@ import com.cocanvas.core.exception.ResourceNotFoundException;
 import com.cocanvas.core.repository.DocumentPermissionRepository;
 import com.cocanvas.core.repository.DocumentRepository;
 import com.cocanvas.core.repository.UserRepository;
+import com.cocanvas.core.security.JwtService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,15 +30,21 @@ public class DocumentService {
     private final DocumentPermissionRepository documentPermissionRepository;
     private final UserRepository userRepository;
     private final WorkspaceService workspaceService;
+    private final JwtService jwtService;
+    private final JwtProperties jwtProperties;
 
     public DocumentService(DocumentRepository documentRepository,
                             DocumentPermissionRepository documentPermissionRepository,
                             UserRepository userRepository,
-                            WorkspaceService workspaceService) {
+                            WorkspaceService workspaceService,
+                            JwtService jwtService,
+                            JwtProperties jwtProperties) {
         this.documentRepository = documentRepository;
         this.documentPermissionRepository = documentPermissionRepository;
         this.userRepository = userRepository;
         this.workspaceService = workspaceService;
+        this.jwtService = jwtService;
+        this.jwtProperties = jwtProperties;
     }
 
     @Transactional
@@ -115,6 +124,20 @@ public class DocumentService {
                 .build());
         permission.setRole(request.role());
         documentPermissionRepository.save(permission);
+    }
+
+    /**
+     * Section 8's handoff: the client already holds a valid access token; this exchanges
+     * it for a short-lived, document-scoped token the sync service can verify by itself
+     * on WebSocket connect, with no callback to the Core API per message.
+     */
+    @Transactional(readOnly = true)
+    public CollabTokenResponse issueCollabToken(UUID documentId, UUID userId) {
+        getDocumentOrThrow(documentId);
+        DocumentRole role = requireDocumentRole(documentId, userId);
+        long ttl = jwtProperties.collabTokenTtlSeconds();
+        String token = jwtService.generateCollabToken(userId, documentId, role.name(), ttl);
+        return new CollabTokenResponse(token, ttl);
     }
 
     @Transactional(readOnly = true)

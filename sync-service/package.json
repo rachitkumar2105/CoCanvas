@@ -2,7 +2,7 @@
   "name": "cocanvas-sync-service",
   "version": "0.1.0",
   "private": true,
-  "description": "CoCanvas Realtime Sync Service — Yjs relay, presence, snapshot persistence. Phase 2 build; currently a health-check placeholder only.",
+  "description": "CoCanvas Realtime Sync Service — Yjs relay, collab-token auth, snapshot persistence via the Core API. Phase 2: single-client document sync with persistence; presence/multi-client convergence is Phase 3.",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
@@ -12,11 +12,16 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "jsonwebtoken": "^9.0.2",
+    "lib0": "^0.2.99",
+    "ws": "^8.18.0",
+    "y-protocols": "^1.0.6",
+    "yjs": "^13.6.19"
   },
   "devDependencies": {
-    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.12",
     "tsx": "^4.16.2",
     "typescript": "^5.5.4",
     "vitest": "^2.0.5"

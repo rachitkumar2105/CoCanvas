@@ -10,3 +10,6 @@ cocanvas:
     secret: test-only-secret-not-for-any-real-environment-minimum-32-bytes
     access-token-ttl-seconds: 900
     refresh-token-ttl-seconds: 1209600
+    collab-token-ttl-seconds: 60
+  internal:
+    sync-service-secret: test-only-internal-secret
