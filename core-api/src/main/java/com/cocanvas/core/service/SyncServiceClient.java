@@ -2,8 +2,10 @@ package com.cocanvas.core.service;
 
 import com.cocanvas.core.config.InternalProperties;
 import com.cocanvas.core.config.SyncServiceProperties;
+import com.cocanvas.core.security.CorrelationIdFilter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.net.URI;
@@ -52,13 +54,20 @@ public class SyncServiceClient {
         String base64State = Base64.getEncoder().encodeToString(yjsState);
         String body = "{\"state\":\"" + base64State + "\"}";
 
-        HttpRequest request = HttpRequest.newBuilder()
+        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                 .uri(URI.create(syncServiceProperties.internalUrl() + "/internal/documents/" + documentId + "/restore"))
                 .header("Content-Type", "application/json")
                 .header("X-Internal-Secret", internalProperties.syncServiceSecret())
                 .timeout(Duration.ofSeconds(3))
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
+                .POST(HttpRequest.BodyPublishers.ofString(body));
+
+        // Carries this request's correlation ID (Section 12) into the sync service's own
+        // structured logs, so a restore can be traced end-to-end across both services.
+        String correlationId = MDC.get(CorrelationIdFilter.MDC_KEY);
+        if (correlationId != null) {
+            requestBuilder.header(CorrelationIdFilter.HEADER, correlationId);
+        }
+        HttpRequest request = requestBuilder.build();
 
         try {
             HttpResponse<Void> response = httpClient.send(request, HttpResponse.BodyHandlers.discarding());

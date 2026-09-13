@@ -10,6 +10,12 @@ vi.mock("../src/persistence/coreApiClient.js", () => ({
   saveSnapshot: (...args: unknown[]) => saveSnapshot(...args),
 }));
 
+vi.mock("../src/presence/redisPresence.js", () => ({
+  mirrorPresence: vi.fn().mockResolvedValue(undefined),
+  removePresence: vi.fn().mockResolvedValue(undefined),
+  pingRedis: vi.fn().mockResolvedValue(true),
+}));
+
 const { getOrCreateRoom, addConnection, _roomsForTesting } = await import("../src/rooms/roomManager.js");
 const { handleMessage } = await import("../src/relay.js");
 

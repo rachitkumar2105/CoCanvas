@@ -9,6 +9,8 @@ import com.cocanvas.core.exception.UnauthorizedException;
 import com.cocanvas.core.repository.UserRepository;
 import com.cocanvas.core.security.JwtService;
 import com.cocanvas.core.security.RefreshTokenService;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,15 +22,23 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RefreshTokenService refreshTokenService;
+    private final Counter loginFailureCounter;
 
     public AuthService(UserRepository userRepository,
                         PasswordEncoder passwordEncoder,
                         JwtService jwtService,
-                        RefreshTokenService refreshTokenService) {
+                        RefreshTokenService refreshTokenService,
+                        MeterRegistry meterRegistry) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
         this.refreshTokenService = refreshTokenService;
+        // A custom metric alongside Spring Boot's auto-instrumented HTTP metrics
+        // (Section 12) — failed logins are exactly the kind of signal a dashboard or
+        // alert would want that generic request-latency histograms don't surface.
+        this.loginFailureCounter = Counter.builder("cocanvas.auth.login.failures")
+                .description("Failed login attempts (wrong email or password)")
+                .register(meterRegistry);
     }
 
     public record AuthResult(AuthResponse response, String refreshToken) {
@@ -52,10 +62,10 @@ public class AuthService {
 
     @Transactional
     public AuthResult login(LoginRequest request) {
-        User user = userRepository.findByEmailIgnoreCase(request.email())
-                .orElseThrow(() -> new UnauthorizedException("Invalid email or password"));
+        User user = userRepository.findByEmailIgnoreCase(request.email()).orElse(null);
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+        if (user == null || !passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            loginFailureCounter.increment();
             throw new UnauthorizedException("Invalid email or password");
         }
 

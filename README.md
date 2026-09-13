@@ -79,8 +79,54 @@ assume anything beyond what's listed as done below actually works.
       What's genuinely not built: the canvas UI itself (shape rendering, drag/draw
       interactions, a library like tldraw or Fabric.js) — that's Phase 6 territory once
       the frontend exists at all.
-- [ ] **Phase 6 — Redis presence, rate limiting, observability, Docker Compose, CI,
-      deployment.** `frontend/` is currently just a folder scaffold — see its README.
+- [x] **Phase 6 — Redis presence, rate limiting, observability, CI, deployment.**
+      - **Redis-backed presence** (`sync-service/src/presence/redisPresence.ts`): every
+        awareness update mirrors into a Redis hash (`presence:{documentId}`, 30s TTL,
+        matching y-protocols/awareness's own staleness window) alongside the in-memory
+        broadcast that actually drives real-time delivery — best-effort, never blocks on
+        Redis being reachable. Verified live: connected a real client, confirmed its
+        state landed in Redis with the right TTL, disconnected, confirmed it was removed.
+      - **Rate limiting** (`RateLimiter` + `RateLimitFilter`, Core API): a hand-rolled
+        sliding-window counter — simple enough that a library would just be indirection —
+        on `/api/auth/register` (5/60s), `/api/auth/login` (10/60s, per IP), and document
+        creation (30/60s, per authenticated user). Verified live: the 11th login attempt
+        within a minute gets a real 429. Concurrency-tested (50 threads hammering one key
+        never grants more than the limit). Limits are configurable
+        (`cocanvas.rate-limit.*`); the test suite runs with very high limits so ordinary
+        functional tests don't trip it, except `RateLimitIntegrationTest`, which
+        deliberately overrides them back down in its own isolated Spring context.
+      - **Correlation IDs** (`CorrelationIdFilter`, Core API): every request gets an
+        `X-Correlation-Id` (generated or client-supplied), in MDC for the console log
+        pattern and echoed back in the response. `SyncServiceClient`'s restore push
+        carries it forward as a header, and the sync service's structured logs include
+        it — a session is traceable across both services, not just within one.
+      - **Structured logging** (`sync-service/src/logger.ts`, pino): connection
+        join/leave with a running count, snapshot-persist duration and byte size, and
+        every error, all as JSON instead of scattered `console.log` lines.
+      - **Metrics**: Micrometer + Prometheus on the Core API (`/actuator/prometheus`,
+        `permitAll` like health/info since a scraper has no user JWT to present) —
+        Spring Boot's auto-instrumented HTTP/JVM/datasource metrics plus three custom
+        counters (`cocanvas.auth.login.failures`, `cocanvas.document.creations` tagged
+        by type, `cocanvas.versions.restored`). Along the way, learned the hard way that
+        Prometheus's naming convention treats a trailing `created`/`count`/`total` in a
+        counter name as a reserved OpenMetrics suffix and silently strips the rest
+        (`cocanvas.documents.created` exported as bare `cocanvas_documents_total`) —
+        renamed to `cocanvas.document.creations` and confirmed the fix live.
+      - **Combined CI** (`.github/workflows/combined-integration-ci.yml`): Section 16
+        explicitly asks for "a combined job running the convergence test against both
+        services running together" — `sync-service/scripts/smoke-test.mjs` automates
+        the exact manual flow used to verify every phase of this build (register →
+        workspace → document → real WebSocket client → write → disconnect → reconnect →
+        content persisted → VIEWER write rejected) against a real `docker compose up`
+        stack, and the CI job runs it on every push/PR. Verified locally first, including
+        that it actually fails with a clear message against a broken stack, before
+        trusting it in CI.
+      - **Deployment**: see the section below — Render/Railway or a single VM, per
+        Section 16; not actually deployed from here since that needs an external
+        platform account this environment doesn't have.
+      `frontend/` is still just a folder scaffold — it was never actually in Phase 6's
+      own roadmap text (Section 16 defines "all four services" as Core API, sync
+      service, Postgres, Redis), so building one wasn't in scope here either.
 
 Never claim a later phase or a Tier 3 feature (Section 3) as done until it's actually built
 and tested.
@@ -128,6 +174,42 @@ cd core-api && mvn test        # Testcontainers spins up a real Postgres — Doc
 cd sync-service && npm test    # Vitest, no external services needed
 ```
 
+### Running the combined end-to-end smoke test
+
+```bash
+docker compose up -d --build
+node sync-service/scripts/smoke-test.mjs
+```
+
+Exercises the full stack over real HTTP + WebSocket calls (Section 16's "combined job");
+this is what `.github/workflows/combined-integration-ci.yml` runs on every push/PR.
+
+## Deployment
+
+Not actually deployed from this environment (no external platform account here), but
+per Section 16, either of these works for two small services plus Postgres and Redis:
+
+- **Render / Railway free tier**: one web service per `core-api/Dockerfile` and
+  `sync-service/Dockerfile`, a managed Postgres and Redis instance each. Set the env
+  vars below on each service; point `SYNC_SERVICE_INTERNAL_URL` /
+  `CORE_API_INTERNAL_URL` at the other service's internal/private URL if the platform
+  provides one, its public URL otherwise.
+- **A single small VM**: clone the repo, `docker compose up -d --build` — the compose
+  file already wires all four services together with working internal DNS names
+  (`postgres`, `redis`, `core-api`, `sync-service`).
+
+Either way, **before deploying anywhere real**, override every `dev-only-*` default:
+
+| Variable | Used by | Must be |
+|---|---|---|
+| `JWT_SECRET` | both | The same value on both services, ≥32 bytes, unpredictable |
+| `INTERNAL_SYNC_SECRET` | both | The same value on both services, unpredictable |
+| `DB_PASSWORD` | core-api | A real Postgres password, not `cocanvas` |
+| `CORS_ALLOWED_ORIGINS` | core-api | Your actual frontend origin, not `localhost` |
+
+And enforce HTTPS/WSS in front of both services (Section 13) — neither terminates TLS
+itself, so that's the load balancer's or platform's job.
+
 ## API surface
 
 Core API:
@@ -149,13 +231,15 @@ Core API:
 | `POST /api/documents/{id}/versions` | Save the current state as a named version (OWNER/EDITOR; 409 if the document has no content yet) |
 | `POST /api/documents/{id}/versions/{versionId}/restore` | Restore a version — updates Postgres and best-effort-pushes into any live session (OWNER/EDITOR) |
 | `GET/POST /internal/documents/{id}/snapshot` | Sync-service-only, guarded by `X-Internal-Secret` — read/write the current auto-save Yjs state |
+| `GET /actuator/health` | Liveness/readiness probes |
+| `GET /actuator/prometheus` | Prometheus scrape endpoint (`permitAll` — no user JWT for a scraper to present) |
 
 Sync service:
 
 | Endpoint | Purpose |
 |---|---|
-| `GET /healthz` | Health check |
-| `WS /sync/{documentId}?token=<collab-token>` | Yjs sync-protocol + awareness relay for one document |
+| `GET /healthz` | Health check — reports Redis reachability, not just a static "ok" |
+| `WS /sync/{documentId}?token=<collab-token>[&correlationId=...]` | Yjs sync-protocol + awareness relay for one document |
 | `POST /internal/documents/{id}/restore` | Core-API-only, guarded by `X-Internal-Secret` — pushes a restored version into the live in-memory session if the document is currently loaded |
 
 See the blueprint's Section 7 for the full target surface (e.g. Section 14's share modal

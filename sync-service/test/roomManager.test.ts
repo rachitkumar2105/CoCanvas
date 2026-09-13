@@ -12,6 +12,14 @@ vi.mock("../src/persistence/coreApiClient.js", () => ({
   saveSnapshot: (...args: unknown[]) => saveSnapshot(...args),
 }));
 
+// Real presence mirroring needs a live Redis; these tests only care about the
+// in-memory awareness broadcast, so the Redis side is stubbed out entirely.
+vi.mock("../src/presence/redisPresence.js", () => ({
+  mirrorPresence: vi.fn().mockResolvedValue(undefined),
+  removePresence: vi.fn().mockResolvedValue(undefined),
+  pingRedis: vi.fn().mockResolvedValue(true),
+}));
+
 // Imported after the mock so roomManager picks up the mocked coreApiClient.
 const {
   getOrCreateRoom,

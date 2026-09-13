@@ -23,11 +23,14 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
         enabled: true
+  metrics:
+    tags:
+      application: core-api
 
 cocanvas:
   jwt:
@@ -46,6 +49,14 @@ cocanvas:
     sync-service-secret: ${INTERNAL_SYNC_SECRET:dev-only-internal-secret-override-in-every-real-environment}
   sync-service:
     internal-url: ${SYNC_SERVICE_INTERNAL_URL:http://localhost:4000}
+  rate-limit:
+    # Section 3 Tier 2: rate limiting on auth and document-creation endpoints.
+    register-max-requests: ${RATE_LIMIT_REGISTER_MAX:5}
+    register-window-seconds: ${RATE_LIMIT_REGISTER_WINDOW_SECONDS:60}
+    login-max-requests: ${RATE_LIMIT_LOGIN_MAX:10}
+    login-window-seconds: ${RATE_LIMIT_LOGIN_WINDOW_SECONDS:60}
+    document-create-max-requests: ${RATE_LIMIT_DOC_CREATE_MAX:30}
+    document-create-window-seconds: ${RATE_LIMIT_DOC_CREATE_WINDOW_SECONDS:60}
 
 logging:
   pattern:

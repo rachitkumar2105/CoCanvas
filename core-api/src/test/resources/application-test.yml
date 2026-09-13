@@ -13,3 +13,14 @@ cocanvas:
     collab-token-ttl-seconds: 60
   internal:
     sync-service-secret: test-only-internal-secret
+  rate-limit:
+    # Generous by default so ordinary functional tests (many of which register/login
+    # several users) never trip the limiter incidentally — RateLimitIntegrationTest
+    # overrides these back down for its own isolated (@DirtiesContext) context to
+    # actually exercise the 429 behavior.
+    register-max-requests: 10000
+    register-window-seconds: 60
+    login-max-requests: 10000
+    login-window-seconds: 60
+    document-create-max-requests: 10000
+    document-create-window-seconds: 60

@@ -5,6 +5,8 @@ import * as awarenessProtocol from "y-protocols/awareness";
 import { fetchSnapshot, saveSnapshot } from "../persistence/coreApiClient.js";
 import type { DocumentRole, DocumentType } from "../auth/collabToken.js";
 import { getShapesMap } from "./shapes.js";
+import { mirrorPresence, removePresence } from "../presence/redisPresence.js";
+import { docLogger } from "../logger.js";
 
 export const messageSync = 0;
 export const messageAwareness = 1;
@@ -82,14 +84,19 @@ function schedulePersist(room: Room) {
   room.persistTimer = setTimeout(() => {
     room.persistTimer = null;
     persistNow(room).catch((err) => {
-      console.error(`[room ${room.documentId}] debounced persist failed:`, err);
+      docLogger(room.documentId).error({ err }, "debounced persist failed");
     });
   }, PERSIST_DEBOUNCE_MS);
 }
 
 async function persistNow(room: Room): Promise<void> {
   const state = Y.encodeStateAsUpdate(room.doc);
+  const startedAt = performance.now();
   await saveSnapshot(room.documentId, state);
+  docLogger(room.documentId).info(
+    { durationMs: Math.round(performance.now() - startedAt), bytes: state.byteLength },
+    "snapshot persisted"
+  );
 }
 
 export async function getOrCreateRoom(documentId: string, documentType: DocumentType): Promise<Room> {
@@ -122,7 +129,7 @@ export async function getOrCreateRoom(documentId: string, documentType: Document
       }
     })
     .catch((err) => {
-      console.error(`[room ${documentId}] failed to hydrate from snapshot:`, err);
+      docLogger(documentId).error({ err }, "failed to hydrate from snapshot");
     });
 
   doc.on("update", (update: Uint8Array, origin: unknown) => {
@@ -144,6 +151,18 @@ export async function getOrCreateRoom(documentId: string, documentType: Document
         }
       }
       broadcastAwarenessUpdate(room, [...added, ...updated, ...removed], originConn);
+
+      // Mirror into Redis (Section 6: presence is ephemeral, short-TTL data, not a
+      // durable table) — best-effort, never blocks the real-time broadcast above.
+      for (const id of [...added, ...updated]) {
+        const state = room.awareness.getStates().get(id);
+        if (state) {
+          void mirrorPresence(room.documentId, id, state);
+        }
+      }
+      for (const id of removed) {
+        void removePresence(room.documentId, id);
+      }
     }
   );
 
@@ -154,11 +173,13 @@ export async function getOrCreateRoom(documentId: string, documentType: Document
 
 export function addConnection(room: Room, ws: WebSocket, role: DocumentRole): void {
   room.conns.set(ws, { role, controlledAwarenessIds: new Set() });
+  docLogger(room.documentId).info({ role, activeConnections: room.conns.size }, "connection joined");
 }
 
 export async function removeConnection(room: Room, ws: WebSocket): Promise<void> {
   const meta = room.conns.get(ws);
   room.conns.delete(ws);
+  docLogger(room.documentId).info({ activeConnections: room.conns.size }, "connection left");
 
   if (meta && meta.controlledAwarenessIds.size > 0) {
     awarenessProtocol.removeAwarenessStates(room.awareness, [...meta.controlledAwarenessIds], "connection closed");
@@ -172,7 +193,7 @@ export async function removeConnection(room: Room, ws: WebSocket): Promise<void>
     try {
       await persistNow(room);
     } catch (err) {
-      console.error(`[room ${room.documentId}] final persist on last disconnect failed:`, err);
+      docLogger(room.documentId).error({ err }, "final persist on last disconnect failed");
     }
     // Only tear down if nobody reconnected while the final persist was in flight.
     if (room.conns.size === 0) {

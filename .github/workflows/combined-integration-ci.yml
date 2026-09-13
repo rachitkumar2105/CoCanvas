@@ -1,0 +1,55 @@
+name: combined integration CI
+
+# Section 16: "a combined job running the convergence test against both services
+# running together." Brings up the real docker-compose stack and runs the same
+# end-to-end flow (register -> workspace -> document -> WebSocket write -> persist
+# across reconnect -> VIEWER-write rejected) verified manually throughout this
+# project's build phases, now automated in sync-service/scripts/smoke-test.mjs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compose-smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20 (for the smoke-test script's dependencies)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: sync-service/package-lock.json
+
+      - name: Install sync-service dependencies
+        working-directory: sync-service
+        run: npm ci
+
+      - name: Build and start the full stack
+        run: docker compose up -d --build
+
+      - name: Wait for containers to report healthy
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker compose ps --format json | jq -s '[.[] | select(.Health != null) | .Health] | all(. == "healthy")')
+            if [ "$status" = "true" ]; then
+              echo "All health-checked containers are healthy"
+              break
+            fi
+            sleep 2
+          done
+
+      - name: Run the combined end-to-end smoke test
+        working-directory: sync-service
+        run: node scripts/smoke-test.mjs
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

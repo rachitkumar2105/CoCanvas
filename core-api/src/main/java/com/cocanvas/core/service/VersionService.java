@@ -8,6 +8,7 @@ import com.cocanvas.core.exception.ConflictException;
 import com.cocanvas.core.exception.ForbiddenException;
 import com.cocanvas.core.exception.ResourceNotFoundException;
 import com.cocanvas.core.repository.DocumentSnapshotRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,13 +26,16 @@ public class VersionService {
     private final DocumentSnapshotRepository documentSnapshotRepository;
     private final DocumentService documentService;
     private final SyncServiceClient syncServiceClient;
+    private final MeterRegistry meterRegistry;
 
     public VersionService(DocumentSnapshotRepository documentSnapshotRepository,
                            DocumentService documentService,
-                           SyncServiceClient syncServiceClient) {
+                           SyncServiceClient syncServiceClient,
+                           MeterRegistry meterRegistry) {
         this.documentSnapshotRepository = documentSnapshotRepository;
         this.documentService = documentService;
         this.syncServiceClient = syncServiceClient;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional(readOnly = true)
@@ -84,5 +88,6 @@ public class VersionService {
         // the document. If nobody's connected (or the sync service is down), the Postgres
         // write above is what the next connection hydrates from regardless.
         syncServiceClient.pushRestoredState(documentId, version.getYjsState());
+        meterRegistry.counter("cocanvas.versions.restored").increment();
     }
 }

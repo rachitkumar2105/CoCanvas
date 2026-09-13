@@ -16,6 +16,7 @@ import com.cocanvas.core.repository.DocumentPermissionRepository;
 import com.cocanvas.core.repository.DocumentRepository;
 import com.cocanvas.core.repository.UserRepository;
 import com.cocanvas.core.security.JwtService;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,19 +33,22 @@ public class DocumentService {
     private final WorkspaceService workspaceService;
     private final JwtService jwtService;
     private final JwtProperties jwtProperties;
+    private final MeterRegistry meterRegistry;
 
     public DocumentService(DocumentRepository documentRepository,
                             DocumentPermissionRepository documentPermissionRepository,
                             UserRepository userRepository,
                             WorkspaceService workspaceService,
                             JwtService jwtService,
-                            JwtProperties jwtProperties) {
+                            JwtProperties jwtProperties,
+                            MeterRegistry meterRegistry) {
         this.documentRepository = documentRepository;
         this.documentPermissionRepository = documentPermissionRepository;
         this.userRepository = userRepository;
         this.workspaceService = workspaceService;
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
+        this.meterRegistry = meterRegistry;
     }
 
     @Transactional
@@ -58,6 +62,11 @@ public class DocumentService {
                 .createdBy(creatorId)
                 .build();
         document = documentRepository.save(document);
+        // Note: avoid naming a Micrometer counter with a trailing "created"/"count"/"total"
+        // segment — Prometheus's naming convention treats those as reserved suffixes and
+        // silently strips the rest (learned by observing "cocanvas.documents.created"
+        // export as bare "cocanvas_documents_total" with the word "created" gone).
+        meterRegistry.counter("cocanvas.document.creations", "type", request.type().name()).increment();
 
         DocumentPermission ownerPermission = DocumentPermission.builder()
                 .documentId(document.getId())

@@ -2,6 +2,8 @@ package com.cocanvas.core.config;
 
 import com.cocanvas.core.security.InternalServiceAuthFilter;
 import com.cocanvas.core.security.JwtAuthFilter;
+import com.cocanvas.core.security.RateLimitFilter;
+import com.cocanvas.core.security.RateLimiter;
 import com.cocanvas.core.security.RestAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -25,15 +27,21 @@ public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
     private final InternalServiceAuthFilter internalServiceAuthFilter;
+    private final RateLimiter rateLimiter;
+    private final RateLimitProperties rateLimitProperties;
     private final CorsProperties corsProperties;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
 
     public SecurityConfig(JwtAuthFilter jwtAuthFilter,
                            InternalServiceAuthFilter internalServiceAuthFilter,
+                           RateLimiter rateLimiter,
+                           RateLimitProperties rateLimitProperties,
                            CorsProperties corsProperties,
                            RestAuthenticationEntryPoint authenticationEntryPoint) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.internalServiceAuthFilter = internalServiceAuthFilter;
+        this.rateLimiter = rateLimiter;
+        this.rateLimitProperties = rateLimitProperties;
         this.corsProperties = corsProperties;
         this.authenticationEntryPoint = authenticationEntryPoint;
     }
@@ -57,7 +65,10 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
-                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
+                        // A Prometheus scraper has no user JWT to present — like health/info,
+                        // this is protected by network policy in a real deployment, not by
+                        // requiring a signed-in user (Section 12).
+                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
                         // Not actually open — InternalServiceAuthFilter below rejects anything
                         // without the shared secret before it reaches a controller. This is
                         // service-to-service trust, not a user session, so it sits outside
@@ -67,7 +78,10 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(internalServiceAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // After JwtAuthFilter so a per-user rule (document creation) can key off
+                // the now-populated SecurityContext instead of falling back to IP.
+                .addFilterAfter(new RateLimitFilter(rateLimiter, rateLimitProperties), JwtAuthFilter.class);
 
         return http.build();
     }

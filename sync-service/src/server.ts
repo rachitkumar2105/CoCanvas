@@ -1,9 +1,12 @@
 import http from "node:http";
+import { randomUUID } from "node:crypto";
 import { URL } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { verifyCollabToken, CollabTokenError } from "./auth/collabToken.js";
 import { addConnection, encodeFullAwarenessState, getOrCreateRoom, removeConnection, restoreLiveRoom, type Room } from "./rooms/roomManager.js";
 import { handleMessage, sendSyncStep1 } from "./relay.js";
+import { logger, docLogger } from "./logger.js";
+import { pingRedis } from "./presence/redisPresence.js";
 
 const port = process.env.PORT ? Number(process.env.PORT) : 4000;
 const JWT_SECRET = process.env.JWT_SECRET ?? "dev-only-secret-please-override-in-every-real-environment-32b";
@@ -11,8 +14,12 @@ const INTERNAL_SECRET = process.env.INTERNAL_SYNC_SECRET ?? "dev-only-internal-s
 
 const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/healthz") {
-    res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", service: "sync-service" }));
+    // Section 12: check the dependency this service actually has (Redis, for
+    // presence) rather than just returning a static "ok" — a real readiness signal.
+    pingRedis().then((redisOk) => {
+      res.writeHead(redisOk ? 200 : 503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: redisOk ? "ok" : "degraded", service: "sync-service", redis: redisOk }));
+    });
     return;
   }
 
@@ -28,16 +35,18 @@ const server = http.createServer((req, res) => {
     }
 
     const documentId = decodeURIComponent(restoreMatch[1]);
+    const correlationId = (req.headers["x-correlation-id"] as string) || randomUUID();
     let body = "";
     req.on("data", (chunk) => (body += chunk));
     req.on("end", () => {
       try {
         const { state } = JSON.parse(body) as { state: string };
         const applied = restoreLiveRoom(documentId, new Uint8Array(Buffer.from(state, "base64")));
+        docLogger(documentId).info({ correlationId, appliedToLiveSession: applied }, "restore applied");
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ appliedToLiveSession: applied }));
       } catch (err) {
-        console.error(`[document ${documentId}] restore failed:`, err);
+        docLogger(documentId).error({ correlationId, err }, "restore failed");
         res.writeHead(400, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "BAD_REQUEST" }));
       }
@@ -54,8 +63,11 @@ wss.on("connection", (
   ws: WebSocket,
   documentId: string,
   role: ReturnType<typeof verifyCollabToken>["role"],
-  documentType: ReturnType<typeof verifyCollabToken>["documentType"]
+  documentType: ReturnType<typeof verifyCollabToken>["documentType"],
+  correlationId: string
 ) => {
+  const log = docLogger(documentId).child({ correlationId });
+
   // getOrCreateRoom is async (it may hydrate from the Core API), but a client sends
   // its first sync message the instant the connection opens — attaching `message`/
   // `close` listeners only after that await resolves would lose whatever arrives in
@@ -77,12 +89,12 @@ wss.on("connection", (
       return;
     }
     removeConnection(room, ws).catch((err) => {
-      console.error(`[document ${documentId}] error persisting on disconnect:`, err);
+      log.error({ err }, "error persisting on disconnect");
     });
   });
 
   ws.on("error", (err) => {
-    console.error(`[document ${documentId}] websocket error:`, err);
+    log.error({ err }, "websocket error");
   });
 
   getOrCreateRoom(documentId, documentType)
@@ -100,7 +112,7 @@ wss.on("connection", (
       pending.length = 0;
     })
     .catch((err) => {
-      console.error(`[document ${documentId}] failed to join room:`, err);
+      log.error({ err }, "failed to join room");
       ws.close(1011, "Failed to join document room");
     });
 });
@@ -117,6 +129,10 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   const documentId = decodeURIComponent(match[1]);
+  // A client that captured the Core API's X-Correlation-Id response header can carry
+  // it forward here to trace a session across both services (Section 12); otherwise
+  // each connection just gets its own.
+  const correlationId = url.searchParams.get("correlationId") ?? randomUUID();
 
   let claims;
   try {
@@ -129,10 +145,10 @@ server.on("upgrade", (req, socket, head) => {
   }
 
   wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit("connection", ws, documentId, claims.role, claims.documentType);
+    wss.emit("connection", ws, documentId, claims.role, claims.documentType, correlationId);
   });
 });
 
 server.listen(port, () => {
-  console.log(`sync-service listening on :${port}`);
+  logger.info({ port }, "sync-service listening");
 });
