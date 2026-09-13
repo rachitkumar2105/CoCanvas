@@ -15,7 +15,7 @@ jobs:
   compose-smoke-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Node 20 (for the smoke-test script's dependencies)
         uses: actions/setup-node@v4
