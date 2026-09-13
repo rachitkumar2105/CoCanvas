@@ -5,6 +5,7 @@ import com.cocanvas.core.security.JwtAuthFilter;
 import com.cocanvas.core.security.RateLimitFilter;
 import com.cocanvas.core.security.RateLimiter;
 import com.cocanvas.core.security.RestAuthenticationEntryPoint;
+import java.util.List;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -19,82 +20,91 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.List;
-
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
-    private final JwtAuthFilter jwtAuthFilter;
-    private final InternalServiceAuthFilter internalServiceAuthFilter;
-    private final RateLimiter rateLimiter;
-    private final RateLimitProperties rateLimitProperties;
-    private final CorsProperties corsProperties;
-    private final RestAuthenticationEntryPoint authenticationEntryPoint;
+  private final JwtAuthFilter jwtAuthFilter;
+  private final InternalServiceAuthFilter internalServiceAuthFilter;
+  private final RateLimiter rateLimiter;
+  private final RateLimitProperties rateLimitProperties;
+  private final CorsProperties corsProperties;
+  private final RestAuthenticationEntryPoint authenticationEntryPoint;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter,
-                           InternalServiceAuthFilter internalServiceAuthFilter,
-                           RateLimiter rateLimiter,
-                           RateLimitProperties rateLimitProperties,
-                           CorsProperties corsProperties,
-                           RestAuthenticationEntryPoint authenticationEntryPoint) {
-        this.jwtAuthFilter = jwtAuthFilter;
-        this.internalServiceAuthFilter = internalServiceAuthFilter;
-        this.rateLimiter = rateLimiter;
-        this.rateLimitProperties = rateLimitProperties;
-        this.corsProperties = corsProperties;
-        this.authenticationEntryPoint = authenticationEntryPoint;
-    }
+  public SecurityConfig(
+      JwtAuthFilter jwtAuthFilter,
+      InternalServiceAuthFilter internalServiceAuthFilter,
+      RateLimiter rateLimiter,
+      RateLimitProperties rateLimitProperties,
+      CorsProperties corsProperties,
+      RestAuthenticationEntryPoint authenticationEntryPoint) {
+    this.jwtAuthFilter = jwtAuthFilter;
+    this.internalServiceAuthFilter = internalServiceAuthFilter;
+    this.rateLimiter = rateLimiter;
+    this.rateLimitProperties = rateLimitProperties;
+    this.corsProperties = corsProperties;
+    this.authenticationEntryPoint = authenticationEntryPoint;
+  }
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
-    }
+  @Bean
+  public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();
+  }
 
-    @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
-        http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
-                // No server-side session and no cookie is ever used to authorize a
-                // request (the refresh cookie only carries an opaque token consumed by
-                // one endpoint) — CSRF doesn't apply to a Bearer-token API. The refresh
-                // cookie's own exposure is bounded by httpOnly + Secure + SameSite=Strict
-                // (Section 13) rather than a CSRF token.
-                .csrf(org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer::disable)
-                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
-                        // A Prometheus scraper has no user JWT to present — like health/info,
-                        // this is protected by network policy in a real deployment, not by
-                        // requiring a signed-in user (Section 12).
-                        .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info", "/actuator/prometheus").permitAll()
-                        // Not actually open — InternalServiceAuthFilter below rejects anything
-                        // without the shared secret before it reaches a controller. This is
-                        // service-to-service trust, not a user session, so it sits outside
-                        // the JWT-authenticated rule below.
-                        .requestMatchers("/internal/**").permitAll()
-                        .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                        .anyRequest().authenticated()
-                )
-                .addFilterBefore(internalServiceAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                // After JwtAuthFilter so a per-user rule (document creation) can key off
-                // the now-populated SecurityContext instead of falling back to IP.
-                .addFilterAfter(new RateLimitFilter(rateLimiter, rateLimitProperties), JwtAuthFilter.class);
+  @Bean
+  public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    http.cors(cors -> cors.configurationSource(corsConfigurationSource()))
+        // No server-side session and no cookie is ever used to authorize a
+        // request (the refresh cookie only carries an opaque token consumed by
+        // one endpoint) — CSRF doesn't apply to a Bearer-token API. The refresh
+        // cookie's own exposure is bounded by httpOnly + Secure + SameSite=Strict
+        // (Section 13) rather than a CSRF token.
+        .csrf(
+            org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer
+                ::disable)
+        .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+        .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
+        .authorizeHttpRequests(
+            auth ->
+                auth.requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh")
+                    .permitAll()
+                    // A Prometheus scraper has no user JWT to present — like health/info,
+                    // this is protected by network policy in a real deployment, not by
+                    // requiring a signed-in user (Section 12).
+                    .requestMatchers(
+                        "/actuator/health",
+                        "/actuator/health/**",
+                        "/actuator/info",
+                        "/actuator/prometheus")
+                    .permitAll()
+                    // Not actually open — InternalServiceAuthFilter below rejects anything
+                    // without the shared secret before it reaches a controller. This is
+                    // service-to-service trust, not a user session, so it sits outside
+                    // the JWT-authenticated rule below.
+                    .requestMatchers("/internal/**")
+                    .permitAll()
+                    .requestMatchers(HttpMethod.OPTIONS, "/**")
+                    .permitAll()
+                    .anyRequest()
+                    .authenticated())
+        .addFilterBefore(internalServiceAuthFilter, UsernamePasswordAuthenticationFilter.class)
+        .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+        // After JwtAuthFilter so a per-user rule (document creation) can key off
+        // the now-populated SecurityContext instead of falling back to IP.
+        .addFilterAfter(new RateLimitFilter(rateLimiter, rateLimitProperties), JwtAuthFilter.class);
 
-        return http.build();
-    }
+    return http.build();
+  }
 
-    private CorsConfigurationSource corsConfigurationSource() {
-        CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(corsProperties.allowedOrigins());
-        configuration.setAllowedMethods(List.of("GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("*"));
-        configuration.setAllowCredentials(true);
+  private CorsConfigurationSource corsConfigurationSource() {
+    CorsConfiguration configuration = new CorsConfiguration();
+    configuration.setAllowedOrigins(corsProperties.allowedOrigins());
+    configuration.setAllowedMethods(List.of("GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"));
+    configuration.setAllowedHeaders(List.of("*"));
+    configuration.setAllowCredentials(true);
 
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
-    }
+    UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+    source.registerCorsConfiguration("/**", configuration);
+    return source;
+  }
 }

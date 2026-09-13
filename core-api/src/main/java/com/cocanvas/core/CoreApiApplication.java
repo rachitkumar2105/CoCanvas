@@ -11,11 +11,14 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 
 @SpringBootApplication
 @EnableConfigurationProperties({
-        JwtProperties.class, CorsProperties.class, InternalProperties.class,
-        SyncServiceProperties.class, RateLimitProperties.class
+  JwtProperties.class,
+  CorsProperties.class,
+  InternalProperties.class,
+  SyncServiceProperties.class,
+  RateLimitProperties.class
 })
 public class CoreApiApplication {
-    public static void main(String[] args) {
-        SpringApplication.run(CoreApiApplication.class, args);
-    }
+  public static void main(String[] args) {
+    SpringApplication.run(CoreApiApplication.class, args);
+  }
 }

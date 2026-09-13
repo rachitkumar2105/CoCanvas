@@ -6,7 +6,4 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 public record CreateDocumentRequest(
-        @NotBlank @Size(max = 255) String title,
-        @NotNull DocumentType type
-) {
-}
+    @NotBlank @Size(max = 255) String title, @NotNull DocumentType type) {}
