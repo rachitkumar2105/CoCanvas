@@ -6,7 +6,7 @@ import { useParams } from "next/navigation";
 import { RequireAuth } from "@/components/RequireAuth";
 import { TopNav } from "@/components/TopNav";
 import { api, ApiError } from "@/lib/api";
-import type { DocumentResponse } from "@/lib/types";
+import type { DocumentResponse, DocumentType } from "@/lib/types";
 
 function DocumentsContent() {
   const params = useParams<{ workspaceId: string }>();
@@ -16,6 +16,7 @@ function DocumentsContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [newTitle, setNewTitle] = useState("");
+  const [newType, setNewType] = useState<DocumentType>("DOCUMENT");
   const [creating, setCreating] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteStatus, setInviteStatus] = useState<string | null>(null);
@@ -36,9 +37,7 @@ function DocumentsContent() {
     if (!newTitle.trim()) return;
     setCreating(true);
     try {
-      // Whiteboard mode's data layer exists (Section 5's blueprint), but this pass
-      // only ships the document editor UI — see the frontend README's scope note.
-      await api.createDocument(workspaceId, newTitle.trim(), "DOCUMENT");
+      await api.createDocument(workspaceId, newTitle.trim(), newType);
       setNewTitle("");
       load();
     } catch (err) {
@@ -78,12 +77,20 @@ function DocumentsContent() {
               onChange={(e) => setNewTitle(e.target.value)}
               className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm"
             />
+            <select
+              value={newType}
+              onChange={(e) => setNewType(e.target.value as DocumentType)}
+              className="rounded-md border border-gray-300 px-2 py-2 text-sm"
+            >
+              <option value="DOCUMENT">Document</option>
+              <option value="WHITEBOARD">Whiteboard</option>
+            </select>
             <button
               type="submit"
               disabled={creating}
               className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             >
-              New document
+              New {newType === "WHITEBOARD" ? "whiteboard" : "document"}
             </button>
           </form>
         </div>

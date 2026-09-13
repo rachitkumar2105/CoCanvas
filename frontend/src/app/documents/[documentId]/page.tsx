@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Editor } from "@/components/Editor";
+import { Whiteboard } from "@/components/Whiteboard";
 import { PresenceBar } from "@/components/PresenceBar";
 import { ShareModal } from "@/components/ShareModal";
 import { VersionHistoryPanel } from "@/components/VersionHistoryPanel";
@@ -103,9 +104,13 @@ function DocumentEditorContent() {
         </div>
       </header>
 
-      <main className="px-6 py-10">
+      <main className={doc.type === "WHITEBOARD" ? "" : "px-6 py-10"}>
         {provider ? (
-          <Editor doc={yDoc} provider={provider} userId={user.userId} userName={user.name} editable={canWrite} />
+          doc.type === "WHITEBOARD" ? (
+            <Whiteboard doc={yDoc} provider={provider} userId={user.userId} userName={user.name} editable={canWrite} />
+          ) : (
+            <Editor doc={yDoc} provider={provider} userId={user.userId} userName={user.name} editable={canWrite} />
+          )
         ) : (
           <div className="flex justify-center py-20 text-gray-400">Connecting…</div>
         )}

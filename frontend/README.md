@@ -1,10 +1,8 @@
 # CoCanvas Frontend
 
 A Next.js (App Router, TypeScript) UI over the Core API and the Sync Service: auth pages,
-a workspace/document dashboard, and a real-time collaborative document editor. This pass
-covers the **document editor only** — no whiteboard canvas UI (the blueprint's own honesty
-section explicitly allows shipping a working document-only editor over a half-working
-doc-plus-whiteboard system; see Section 22).
+a workspace/document dashboard, a real-time collaborative document editor, and a
+real-time collaborative whiteboard.
 
 ## Running it
 
@@ -48,25 +46,46 @@ must be fetched from the Core API on *every* reconnect — not just the first co
 doesn't fit that model. The hand-rolled provider re-fetches `/api/documents/{id}/collab-token`
 before each (re)connect attempt, with exponential backoff on failure.
 
+## The whiteboard: a hand-rolled SVG canvas, not tldraw/Fabric.js
+
+Section 5's tech stack suggests tldraw or a Yjs-bound Fabric.js canvas. Both have their own
+internal document schemas that don't map cleanly onto the backend's actual shape model — a
+flat, opaque JSON record per shape in a top-level `Y.Map` keyed by id
+(`sync-service/src/rooms/shapes.ts`), with no nested per-property CRDT merging (an edit
+replaces a shape atomically). Bridging either library's schema onto that model is real
+adapter work for a library that would then fight the underlying data structure, rather than
+the TipTap situation where the library actively assumed a *different* Yjs type existed.
+Given that, `src/components/Whiteboard.tsx` is a small hand-rolled SVG canvas — rectangles,
+ellipses, sticky notes, and freehand paths, each stored exactly as `shapes.ts` describes them
+— which keeps the frontend's shape schema and the tested backend's shape schema identical
+instead of introducing a translation layer.
+
+Unlike the text editor, the whiteboard *does* render other collaborators' live cursors as
+colored dots (via the same awareness channel, with a `cursor: {x, y}` field) — a canvas is
+just coordinates, so this doesn't have the "can't render a caret inside a native textarea"
+problem the document editor has.
+
 ## What's built
 
 - Register / login / logout, silent session restore via the httpOnly refresh cookie on load
 - Workspace list + create, workspace member invites
-- Document list + create (document type only) within a workspace
-- The collaborative editor: live multi-tab text sync, presence avatars with a
+- Document list + create (either document type) within a workspace
+- The collaborative document editor: live multi-tab text sync, presence avatars with a
   status indicator (Saved / Connecting / Reconnecting), a save/sync status line
-- Share modal (assign OWNER/EDITOR/VIEWER per document)
+- The collaborative whiteboard: rectangle/ellipse/sticky-note/freehand tools, per-shape
+  color, select/move/delete, live multi-tab shape sync, and live collaborator cursor dots
+- Share modal (assign OWNER/EDITOR/VIEWER per document — works the same for both types)
 - Version history panel: save a labeled snapshot, list snapshots, restore one
   (restoring updates the live session for every open tab via the relay's broadcast,
-  not just this page)
-- VIEWER role is enforced in the UI (textarea disabled, Share hidden) — the real
+  not just this page) — works for whiteboards too, since it's generic on document id
+- VIEWER role is enforced in the UI (editor/canvas disabled, Share hidden) — the real
   enforcement is still server-side, at the relay (Section 10, point 3)
 
-## What's explicitly not built in this pass
+## What's explicitly not built
 
-- Whiteboard canvas UI (the whiteboard *data layer* — shape sync — is built and tested on
-  the backend; there's simply nothing to draw with yet)
-- Inline collaborator cursor rendering inside the text (a native `<textarea>` can't render
-  a colored caret at another user's position the way a rich editor can) — presence is
-  visible as avatars + connection status instead, not as an in-text cursor
+- Inline collaborator cursor rendering inside the *text* editor (a native `<textarea>`
+  can't render a colored caret at another user's position the way a rich editor can) —
+  presence is visible there as avatars + connection status instead
+- Shape resize handles (move and delete are implemented; resizing an existing shape isn't)
+- Pan/zoom on the whiteboard — it's a large (2400×1400) scrollable canvas instead
 - User settings / profile / active-sessions page

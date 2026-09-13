@@ -127,13 +127,13 @@ assume anything beyond what's listed as done below actually works.
       `frontend/` was still just a folder scaffold at the end of this phase — it was
       never actually in Phase 6's own roadmap text (Section 16 defines "all four
       services" as Core API, sync service, Postgres, Redis).
-- [~] **Frontend — document editor UI, by deliberate scope decision.** Section 21's own
-      honesty note is explicit: no frontend existed, so nobody could actually open a
-      browser and use CoCanvas — every phase above was verified at the protocol/API
-      level. This pass builds a real Next.js (App Router, TypeScript) UI covering the
-      document editor only, not the whiteboard, per Section 22's explicit permission to
-      ship a working document-only editor rather than a half-working doc-plus-whiteboard
-      one:
+- [x] **Frontend — document editor UI.** Section 21's own honesty note was explicit: no
+      frontend existed, so nobody could actually open a browser and use CoCanvas — every
+      phase above was verified at the protocol/API level. This pass builds a real Next.js
+      (App Router, TypeScript) UI, initially scoped to the document editor only per
+      Section 22's explicit permission to ship a working document-only editor rather than
+      a half-working doc-plus-whiteboard one (the whiteboard UI followed as its own pass
+      below):
       - Auth pages (register/login/logout), silent session restore on load via the
         httpOnly refresh cookie and `/api/auth/refresh` (no token in `localStorage`).
       - Workspace list + create, workspace member invites; document list + create
@@ -158,11 +158,37 @@ assume anything beyond what's listed as done below actually works.
         live in a second tab with no refresh → refresh and confirm persistence → save
         and restore a version live → share as VIEWER and confirm the second account
         sees a read-only, disabled editor.
-      What's not built: the whiteboard canvas UI (the whiteboard *data layer* — shape
-      sync — is already built and tested on the backend; there's nothing to draw with
-      yet), inline collaborator cursor rendering inside the text (presence is
-      avatars-and-status, not an in-text caret — a native `<textarea>` can't render
-      one the way a rich editor can), and a user settings/profile page.
+      What wasn't built in this pass: the whiteboard canvas UI (below), inline
+      collaborator cursor rendering inside the text (presence is avatars-and-status, not
+      an in-text caret — a native `<textarea>` can't render one the way a rich editor
+      can), and a user settings/profile page.
+- [x] **Frontend — whiteboard UI.** A hand-rolled SVG canvas
+      (`frontend/src/components/Whiteboard.tsx`), not tldraw or Fabric.js as Section 5
+      suggests — see `frontend/README.md` for why: both libraries carry their own
+      document schema, and bridging either onto the backend's actual shape model (a flat
+      JSON record per shape in a `Y.Map`, `sync-service/src/rooms/shapes.ts`) is real
+      adapter work for a library that would then fight the data structure underneath it.
+      - Tools: select/move/delete, rectangle, ellipse, sticky note (double-click to edit
+        text), and freehand pen — each shape stored exactly as the backend's tested
+        model expects, so every guarantee already verified there (convergence,
+        persistence, version restore, VIEWER-write rejection) applies unmodified.
+      - Live collaborator cursors as colored dots (an awareness `cursor: {x, y}` field)
+        — something the text editor's native `<textarea>` can't do, since a canvas is
+        just coordinates.
+      - The document list's "New document" form now offers a type selector
+        (Document / Whiteboard); the document page branches on `doc.type` to render
+        either editor. Share, version history, and presence are shared components that
+        already worked generically on document id, unchanged for whiteboards.
+      - Verified live end-to-end in a real browser against the full `docker compose`
+        stack: create a whiteboard → draw a rectangle, ellipse, sticky note (with text),
+        and a freehand path → open a second tab and confirm all four shapes hydrate
+        correctly → drag a shape in one tab and see it move live in the other with no
+        refresh → move a cursor in one tab and see the colored dot appear in the other
+        → share as VIEWER and confirm a forged drag attempt has no effect for that
+        account.
+      Not built: shape resize handles (move/delete only), pan/zoom (a large scrollable
+      canvas instead), and per-property shape merging (the backend's own documented
+      limitation — an edit replaces a shape atomically, Section 5).
 
 Never claim a later phase or a Tier 3 feature (Section 3) as done until it's actually built
 and tested.
