@@ -1,0 +1,12 @@
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+cocanvas:
+  jwt:
+    secret: test-only-secret-not-for-any-real-environment-minimum-32-bytes
+    access-token-ttl-seconds: 900
+    refresh-token-ttl-seconds: 1209600

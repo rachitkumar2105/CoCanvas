@@ -1,0 +1,29 @@
+# Java / Maven
+core-api/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# Node
+node_modules/
+sync-service/dist/
+frontend/.next/
+frontend/out/
+npm-debug.log*
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

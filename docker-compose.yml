@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: cocanvas
+      POSTGRES_USER: cocanvas
+      POSTGRES_PASSWORD: cocanvas
+    ports:
+      - "5432:5432"
+    volumes:
+      - cocanvas-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cocanvas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  core-api:
+    build: ./core-api
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/cocanvas
+      DB_USERNAME: cocanvas
+      DB_PASSWORD: cocanvas
+      JWT_SECRET: dev-only-secret-please-override-in-every-real-environment-32b
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  sync-service:
+    build: ./sync-service
+    environment:
+      PORT: 4000
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: dev-only-secret-please-override-in-every-real-environment-32b
+    ports:
+      - "4000:4000"
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # frontend is not wired in yet — see frontend/README.md. Uncomment once Phase 1's
+  # UI work lands and the Next.js app actually builds.
+  # frontend:
+  #   build: ./frontend
+  #   environment:
+  #     NEXT_PUBLIC_CORE_API_URL: http://localhost:8080
+  #     NEXT_PUBLIC_SYNC_SERVICE_URL: ws://localhost:4000
+  #   ports:
+  #     - "3000:3000"
+  #   depends_on:
+  #     - core-api
+  #     - sync-service
+
+volumes:
+  cocanvas-postgres-data:
